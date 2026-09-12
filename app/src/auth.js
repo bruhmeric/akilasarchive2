@@ -9,11 +9,22 @@ const MAX_ATTEMPTS = 6
 const LOCKOUT_MS = 15 * 60e3
 
 export function seedAdminPassword () {
-  if (db.prepare('SELECT v FROM meta WHERE k = ?').get('admin_password')) return
-  db.prepare('INSERT INTO meta (k, v) VALUES (?, ?)').run('admin_password', scryptHash(config.adminPassword))
-  if (config.adminPassword === 'changeme123') {
-    db.prepare("INSERT INTO meta (k, v) VALUES ('password_is_default', '1') ON CONFLICT (k) DO UPDATE SET v = '1'").run()
+  const existing = db.prepare('SELECT v FROM meta WHERE k = ?').get('admin_password')
+  if (existing && !config.adminPasswordForce) return
+  db.prepare(
+    'INSERT INTO meta (k, v) VALUES (?, ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v'
+  ).run('admin_password', scryptHash(config.adminPassword))
+  const isDefault = config.adminPassword === 'changeme123'
+  db.prepare("INSERT INTO meta (k, v) VALUES ('password_is_default', ?) ON CONFLICT (k) DO UPDATE SET v = excluded.v")
+    .run(isDefault ? '1' : '0')
+  if (isDefault) {
     adminLog('warn', 'admin password is the default — change it in Settings')
+  }
+  if (existing && config.adminPasswordForce) {
+    db.prepare('DELETE FROM sessions').run() // force re-login everywhere
+    adminLog('warn', 'admin password force-reset from ADMIN_PASSWORD (ADMIN_PASSWORD_FORCE=1)')
+    console.log('  [auth] admin password overwritten from ADMIN_PASSWORD (ADMIN_PASSWORD_FORCE=1)')
+    console.log('  [auth] remove ADMIN_PASSWORD_FORCE from .env after logging in')
   }
 }
 

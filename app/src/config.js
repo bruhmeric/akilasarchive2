@@ -48,6 +48,9 @@ const config = {
   // --- auth ---
   sessionSecret: required('SESSION_SECRET', 'Signs admin session cookies. Generate: openssl rand -hex 32'),
   adminPassword: envStr('ADMIN_PASSWORD', 'changeme123'),
+  // ADMIN_PASSWORD_FORCE=1 → on boot, overwrite the stored (DB) password with
+  // ADMIN_PASSWORD. Recovers you when the first boot seeded a different value.
+  adminPasswordForce: /^(1|true|yes)$/i.test(envStr('ADMIN_PASSWORD_FORCE', '')),
   cookieSecure: publicBaseUrl.startsWith('https://'),
 
   // --- behaviour ---

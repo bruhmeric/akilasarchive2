@@ -141,7 +141,8 @@ git pull && ./deploy.sh
 | `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | from step 1 |
 | `DOWNLOAD_SECRET` | the same hex secret you set on the worker |
 | `SESSION_SECRET` | `openssl rand -hex 32` |
-| `ADMIN_PASSWORD` | initial admin password (change it in the panel afterwards) |
+| `ADMIN_PASSWORD` | initial admin password (**first boot only** — afterwards change it in the panel; see Troubleshooting to recover) |
+| `ADMIN_PASSWORD_FORCE` | `1` = overwrite the stored password from `ADMIN_PASSWORD` on next boot (recovery only, remove after) |
 | `DOWNLOAD_BASE_URL` | `https://dl.akilasarchive.site` or the workers.dev URL |
 | `DL_MODE` | `worker` (recommended) or `presign` fallback |
 
@@ -209,6 +210,8 @@ Backups: everything durable lives in `./data/archive.db` (SQLite) + `.env`.
 | symptom | fix |
 |---|---|
 | container restart-loop with `[FATAL] Missing required environment variable` | `.env` incomplete — `docker compose logs app` names the variable. |
+| **admin login rejects the `.env` password** | **`ADMIN_PASSWORD` is only read on the very first boot** — afterwards the password lives in the database (`./data/archive.db`) and editing `.env` does nothing. Two fixes: (a) add `ADMIN_PASSWORD_FORCE=1` to `.env`, set `ADMIN_PASSWORD` to the desired value, `docker compose up -d`, log in, then remove the force flag; or (b) hot-reset without restarting: `docker compose exec app node scripts/reset-password.js 'MyNewPass123'`. Also note: 6 failed attempts lock your IP out for 15 minutes ("locked — retry in N min") — a restart clears it immediately. |
+| admin login says "locked — retry in N min" | brute-force lockout (15 min). Wait it out, or clear instantly with `docker compose restart app`. |
 | admin "R2 list failed" on add | wrong bucket name, or token scope/permissions — test with `aws s3 ls --endpoint https://<acct>.r2.cloudflarestorage.com` or rclone. |
 | terminal shows volumes but "no volumes mounted yet" | categories not added/enabled in admin, or index still running — check dashboard. |
 | `/get/<link>` → 403 invalid signature | `DOWNLOAD_SECRET` differs between `.env` (VPS) and the worker secret — re-run `wrangler secret put`. |
