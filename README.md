@@ -1,0 +1,239 @@
+# Akilas Archive
+
+A public **file terminal** for your Cloudflare R2 buckets — a beautiful
+Linux-style command-line site with extensive search, one-time download
+links, and a private admin panel — sized for a **512 MB / 1 vCPU VPS**.
+
+```
+                       ┌───────────────────────────────┐
+   visitors ──────────▶│  akilasarchive.site          │  Caddy (auto-HTTPS) + app
+                       │  terminal UI · search · links │  Docker, ~130 MB RAM total
+                       └──────────────┬────────────────┘  (metadata only — KBs)
+                                      │ list/index objects
+                                      ▼
+                          Cloudflare R2  (your buckets)
+
+   visitors ──────────▶ dl.akilasarchive.site ─▶ Cloudflare Worker ─▶ R2
+                       (one-time HMAC link)      streams the file
+```
+
+**File bytes never touch the VPS.** The VPS only ever serves the terminal
+HTML/CSS/JS and small JSON search results. Downloads are streamed from
+Cloudflare's edge by the Worker.
+
+---
+
+## What you get
+
+| piece | where | what it does |
+|---|---|---|
+| `app/` | your VPS (Docker) | Node 22 + Express + SQLite — terminal UI, admin panel, search index, one-time link issuer. No build step. |
+| `worker/` | Cloudflare Workers | download gateway: validates one-time links, streams R2 objects, supports resume (Range). |
+| `Caddyfile` | your VPS | automatic HTTPS for akilasarchive.site, compression, security headers. |
+| `deploy.sh` | your VPS | one-command deploy / update from git. |
+
+Public visitors only ever see `akilasarchive.site` URLs. No bucket names, no
+R2 endpoints, no account IDs appear anywhere in the public UI — links are
+one-time, single-use and expire in minutes.
+
+---
+
+## 0 · Prerequisites
+
+- VPS with Docker + docker compose v2 (Ubuntu: `curl -fsSL https://get.docker.com | sh`)
+- Domain **akilasarchive.site** at Namecheap
+- A free Cloudflare account with **R2** enabled (billing tab → R2 → purchase
+  the free plan — gives 10 GB storage + zero egress fees on the worker path)
+- Ports 80/443 free on the VPS (your existing app on 8080 is untouched)
+
+---
+
+## 1 · R2 buckets + API token
+
+1. Cloudflare dashboard → **R2** → note your **Account ID** (right sidebar).
+2. Create your buckets if not done yet (e.g. `movies`, `tv`, `music`) and
+   upload files (rclone is great for this).
+3. R2 → **Manage API Tokens** → **Create API token**:
+   - permissions: **Object Read & Write**
+   - scope: *Apply to all buckets* (so you can add buckets from the admin
+     panel without touching the token)
+   - copy the **Access Key ID** and **Secret Access Key**.
+
+## 2 · Deploy the download Worker (from your own PC, not the VPS)
+
+The worker is deployed once from any machine with Node installed:
+
+```bash
+cd worker
+npm install
+npx wrangler login            # opens a browser to authorise
+```
+
+Edit `wrangler.toml`: set `R2_ACCOUNT_ID` in `[vars]`.
+
+Set the three secrets:
+
+```bash
+npx wrangler secret put DOWNLOAD_SECRET      # paste: openssl rand -hex 32
+npx wrangler secret put R2_ACCESS_KEY_ID     # your R2 Access Key ID
+npx wrangler secret put R2_SECRET_ACCESS_KEY # your R2 Secret
+npx wrangler deploy
+```
+
+Note the printed URL (`https://akilas-archive-dl.<your-sub>.workers.dev`) —
+this is your `DOWNLOAD_BASE_URL` unless you do step 2b.
+
+### 2b (recommended) · Custom domain `dl.akilasarchive.site`
+
+Serve downloads from your own subdomain instead of `workers.dev`:
+
+1. In Cloudflare, add your domain: dash → **Add a domain** → `akilasarchive.site`
+   (free plan) → it gives you **two nameservers**.
+2. Namecheap → Domain → Nameservers → **Custom DNS** → paste the two
+   Cloudflare nameservers. (DNS propagates in minutes to hours.)
+3. In Cloudflare **DNS**: add record `A` → name `@` → your **VPS IP**, proxy
+   status **DNS only (grey cloud)** — so Caddy on the VPS handles TLS.
+4. In `worker/wrangler.toml`, **uncomment** the `routes` block
+   (`pattern = "dl.akilasarchive.site"`) → `npx wrangler deploy` again.
+
+If you skip 2b, just set `DOWNLOAD_BASE_URL` in `.env` to the
+`workers.dev` URL — everything else works identically.
+
+## 3 · DNS for the main site
+
+- **If you moved nameservers to Cloudflare (step 2b):** nothing more to do —
+  the `A @ → VPS IP` record (grey cloud) already points the apex at your VPS.
+  Optionally add `CNAME www → akilasarchive.site` (also grey).
+- **If you stayed on Namecheap DNS:** in Namecheap → Advanced DNS add
+  `A Record | @ | <VPS IP>` and `A Record | www | <VPS IP>`, and use the
+  `workers.dev` URL as `DOWNLOAD_BASE_URL`.
+
+Open the firewall (only needed once):
+
+```bash
+sudo ufw allow 80/tcp && sudo ufw allow 443/tcp
+```
+
+## 4 · Deploy on the VPS (from git)
+
+```bash
+ssh your-vps
+git clone <your-repo-url> akilas-archive && cd akilas-archive
+cp .env.example .env
+nano .env          # fill in every value (see the file's comments)
+./deploy.sh
+```
+
+`deploy.sh` builds the image, starts `app` + `caddy`, and waits for the
+health check. Caddy obtains the TLS certificate automatically on the first
+request to `https://akilasarchive.site`.
+
+**Updates from git are just:**
+
+```bash
+git pull && ./deploy.sh
+```
+
+### .env values (full reference)
+
+| var | value |
+|---|---|
+| `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` | from step 1 |
+| `DOWNLOAD_SECRET` | the same hex secret you set on the worker |
+| `SESSION_SECRET` | `openssl rand -hex 32` |
+| `ADMIN_PASSWORD` | initial admin password (change it in the panel afterwards) |
+| `DOWNLOAD_BASE_URL` | `https://dl.akilasarchive.site` or the workers.dev URL |
+| `DL_MODE` | `worker` (recommended) or `presign` fallback |
+
+## 5 · Configure your categories
+
+Open **`https://akilasarchive.site/admin`** and log in.
+
+- **Categories → add category**: e.g. name `Movies`, bucket `movies`.
+  The panel tests the bucket against R2 immediately, then starts indexing.
+- Each category = one served bucket; the **toggle switch** instantly
+  shows/hides it in the public terminal (your "control which buckets to
+  serve" switch).
+- **Settings**: re-index interval, one-time link lifetime, download window,
+  and the admin password.
+- **Log**: audit trail of logins, re-indexes and category changes.
+
+Public site: **`https://akilasarchive.site`** — a terminal:
+
+```
+guest@akilasarchive:~$ ls
+guest@akilasarchive:~$ cd movies
+guest@akilasarchive:~/movies$ search matrix -t mkv --min 1GB
+guest@akilasarchive:~/movies$ download 42
+✔ one-time download link ready:
+    https://akilasarchive.site/get/AbC123…
+```
+
+Commands: `ls · cd · tree · search (find/grep) · download (dl) · info ·
+stats · neofetch · theme · crt · help` — plus tab completion, history and
+clickable rows. `help search` shows all search flags
+(`-c` category, `-t` type, `--min/--max` size, `--sort`, pages…).
+
+---
+
+## Memory footprint (512 MB VPS)
+
+| process | RAM |
+|---|---|
+| app (Node, capped at `--max-old-space-size=192`, compose `mem_limit: 280m`) | ~70–140 MB |
+| caddy | ~20–40 MB |
+| **total** | **~150 MB** — plenty of headroom for your 8080 app |
+
+Recommended extras on a small VPS: add a swapfile (`fallocate -l 1G
+/swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile`
++ fstab entry) so the first big index build never OOMs.
+
+Indexing only **lists object metadata** (1000 keys per request, batched and
+yielding so the terminal stays responsive); it never downloads file bytes.
+
+## Operations cheat-sheet
+
+```bash
+docker compose ps                # status
+docker compose logs -f app       # app logs
+docker compose restart app       # restart
+./deploy.sh                      # re-deploy / update
+docker compose exec app node -e "fetch('http://127.0.0.1:3000/api/health').then(r=>r.text()).then(console.log)"
+```
+
+Backups: everything durable lives in `./data/archive.db` (SQLite) + `.env`.
+`cp -a data /backup` while the app is stopped is a full backup.
+
+## Troubleshooting
+
+| symptom | fix |
+|---|---|
+| container restart-loop with `[FATAL] Missing required environment variable` | `.env` incomplete — `docker compose logs app` names the variable. |
+| admin "R2 list failed" on add | wrong bucket name, or token scope/permissions — test with `aws s3 ls --endpoint https://<acct>.r2.cloudflarestorage.com` or rclone. |
+| terminal shows volumes but "no volumes mounted yet" | categories not added/enabled in admin, or index still running — check dashboard. |
+| `/get/<link>` → 403 invalid signature | `DOWNLOAD_SECRET` differs between `.env` (VPS) and the worker secret — re-run `wrangler secret put`. |
+| `/get/<link>` → worker 500 misconfigured | worker missing `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`. |
+| download starts then dies at ~100 MB | you're on workers.dev with `DL_MODE=worker` — fine normally; if it persists check R2 token perms. |
+| certificate errors on first visit | DNS not propagated yet, or ports 80/443 blocked — `docker compose logs caddy`. |
+| something on the VPS already uses 80/443 | stop it, or remap ports in `docker-compose.yml` and adjust `Caddyfile` site addresses. |
+
+## Security notes
+
+- Public API is read-only, rate-limited, and reveals only category names,
+  file names/sizes/dates and `/get/<token>` links — never bucket names or R2
+  endpoints (in `worker` mode).
+- One-time links: single-use, short-lived, redeemable once, then HTTP 410.
+- Admin: scrypt-hashed password, HttpOnly+SameSite cookie, login rate
+  limiting + lockout, audit log; `/admin` is `noindex` and blocked in
+  `robots.txt`.
+- The app runs as an unprivileged user; SQLite lives in `./data`.
+
+## Local demo (no R2 needed)
+
+```bash
+cd app
+DATA_DIR=./data-demo R2_ACCOUNT_ID=0 R2_ACCESS_KEY_ID=x R2_SECRET_ACCESS_KEY=x \
+DOWNLOAD_SECRET=$(openssl rand -hex 32) SESSION_SECRET=$(openssl rand -hex 32) \
+ADMIN_PASSWORD=test1234 node ../scripts/seed-demo.js
+# then start with the same env and DATA_DIR and open http://localhost:3000
+```

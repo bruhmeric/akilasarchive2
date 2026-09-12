@@ -1,0 +1,19 @@
+name = "akilas-archive-dl"
+main = "src/index.js"
+compatibility_date = "2025-06-01"
+
+# Optional: serve downloads from your own subdomain.
+# Requires the akilasarchive.site zone to be active in the SAME Cloudflare
+# account (i.e. you moved your domain's nameservers to Cloudflare — see README
+# step 3). After enabling this, run `npx wrangler deploy` once more.
+# routes = [
+#   { pattern = "dl.akilasarchive.site", custom_domain = true }
+# ]
+
+[vars]
+R2_ACCOUNT_ID = "REPLACE_WITH_YOUR_CLOUDFLARE_ACCOUNT_ID"
+
+# Secrets — set once with (from this folder):
+#   npx wrangler secret put DOWNLOAD_SECRET     # same value as DOWNLOAD_SECRET in .env on the VPS
+#   npx wrangler secret put R2_ACCESS_KEY_ID     # R2 API token Access Key ID
+#   npx wrangler secret put R2_SECRET_ACCESS_KEY # R2 API token Secret

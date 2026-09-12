@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>root console — akilas archive</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23050906'/%3E%3Cpath d='M9 8h4v16H9z' fill='%23ffc857'/%3E%3Cpath d='M15 22h8v2h-8z' fill='%23ffc857'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="admin.css">
+</head>
+<body>
+
+<!-- login -->
+<div id="login" class="login-wrap">
+  <form id="login-form" class="login-card">
+    <div class="login-logo">⬡</div>
+    <h1>akilas archive</h1>
+    <p class="login-sub">root console — authenticate</p>
+    <input id="login-pw" type="password" placeholder="admin password" autocomplete="current-password" autofocus>
+    <button type="submit">login</button>
+    <div id="login-err" class="login-err" hidden></div>
+  </form>
+</div>
+
+<!-- app -->
+<div id="app" class="app" hidden>
+  <aside class="side">
+    <div class="brand">⬡ akilas<span>archive</span></div>
+    <nav>
+      <button data-view="dash" class="on">dashboard</button>
+      <button data-view="cats">categories</button>
+      <button data-view="settings">settings</button>
+      <button data-view="logs">log</button>
+    </nav>
+    <div class="side-foot">
+      <div id="ver" class="dim"></div>
+      <button id="logout">logout</button>
+    </div>
+  </aside>
+
+  <main>
+    <div id="default-warn" class="warn-banner" hidden>
+      ⚠ the admin password is still the default — change it in settings now.
+    </div>
+
+    <!-- dashboard -->
+    <section id="view-dash" class="view">
+      <h2>dashboard</h2>
+      <div class="cards">
+        <div class="card"><div class="k">files indexed</div><div class="v" id="d-files">—</div></div>
+        <div class="card"><div class="k">total size</div><div class="v" id="d-size">—</div></div>
+        <div class="card"><div class="k">categories</div><div class="v" id="d-cats">—</div></div>
+        <div class="card"><div class="k">links today</div><div class="v" id="d-tokens">—</div></div>
+        <div class="card"><div class="k">index size</div><div class="v" id="d-db">—</div></div>
+        <div class="card"><div class="k">uptime</div><div class="v" id="d-up">—</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>indexer</h3>
+          <button id="reindex-all" class="btn">rebuild all indexes</button>
+        </div>
+        <div id="indexer-state" class="indexer-state">idle</div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>categories</h3><span class="dim" id="cats-note"></span></div>
+        <table class="tbl" id="dash-cats"></table>
+      </div>
+    </section>
+
+    <!-- categories -->
+    <section id="view-cats" class="view" hidden>
+      <h2>categories</h2>
+      <p class="dim">each category serves one R2 bucket. the public terminal only ever sees the category name.</p>
+      <div class="panel">
+        <div class="panel-head"><h3>add category</h3></div>
+        <form id="add-cat" class="add-form">
+          <div class="field">
+            <label>display name</label>
+            <input id="cat-name" placeholder="Movies" maxlength="40" required>
+            <span class="hint">shown in the terminal (e.g. as <code>~/movies</code>)</span>
+          </div>
+          <div class="field">
+            <label>R2 bucket name</label>
+            <input id="cat-bucket" placeholder="my-movies-bucket" pattern="[a-z0-9][a-z0-9-]{1,61}[a-z0-9]" required>
+            <span class="hint">exactly as it appears in Cloudflare R2</span>
+          </div>
+          <button class="btn primary" type="submit">add &amp; index</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>served buckets</h3></div>
+        <table class="tbl" id="cats-table"></table>
+      </div>
+    </section>
+
+    <!-- settings -->
+    <section id="view-settings" class="view" hidden>
+      <h2>settings</h2>
+      <div class="panel">
+        <div class="panel-head"><h3>behaviour</h3></div>
+        <form id="settings-form" class="settings-grid">
+          <div class="field">
+            <label>re-index interval (hours, 0 = manual only)</label>
+            <input id="s-interval" type="number" min="0" max="168">
+          </div>
+          <div class="field">
+            <label>one-time link lifetime (minutes)</label>
+            <input id="s-ttl" type="number" min="1" max="60">
+          </div>
+          <div class="field">
+            <label>download window after redeem (seconds)</label>
+            <input id="s-expiry" type="number" min="30" max="3600">
+          </div>
+          <button class="btn primary" type="submit">save</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>change password</h3></div>
+        <form id="pw-form" class="settings-grid">
+          <div class="field"><label>current password</label><input id="pw-cur" type="password" autocomplete="current-password" required></div>
+          <div class="field"><label>new password (min 8 chars)</label><input id="pw-new" type="password" autocomplete="new-password" minlength="8" required></div>
+          <button class="btn primary" type="submit">change</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>deployment (read-only)</h3></div>
+        <dl class="kv" id="env-info"></dl>
+      </div>
+    </section>
+
+    <!-- logs -->
+    <section id="view-logs" class="view" hidden>
+      <h2>activity log</h2>
+      <div class="panel">
+        <table class="tbl" id="log-table"></table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" hidden></div>
+<script src="admin.js"></script>
+</body>
+</html>

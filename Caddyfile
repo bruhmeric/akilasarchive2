@@ -1,0 +1,32 @@
+{
+	# Optional — replace with your real address (or delete these two lines
+	# and Caddy will register without an email):
+	# email you@akilasarchive.site
+}
+
+# www → apex
+www.akilasarchive.site {
+	redir https://akilasarchive.site{uri} 308
+}
+
+# main site — terminal UI + APIs (metadata only; downloads never pass here)
+akilasarchive.site {
+	encode zstd gzip
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	reverse_proxy app:3000 {
+		header_up X-Real-IP {remote_host}
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>akilas archive — terminal</title>
+<meta name="description" content="Akilas Archive — public file terminal. Browse, search and download with one-time links.">
+<meta name="theme-color" content="#050906">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='4' fill='%23050906'/%3E%3Cpath d='M9 8h4v16H9z' fill='%2341ff7a'/%3E%3Cpath d='M15 22h8v2h-8z' fill='%2341ff7a' opacity='.85'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/terminal.css">
+</head>
+<body data-theme="green">
+<div id="crt" aria-hidden="true"></div>
+
+<main id="term" aria-label="terminal">
+  <div id="screen"></div>
+  <div id="inputline">
+    <span id="prompt" aria-hidden="true"></span>
+    <input id="cli" autocomplete="off" autocapitalize="off" spellcheck="false"
+           aria-label="type a command" autofocus>
+  </div>
+</main>
+
+<div id="chips" aria-label="quick commands">
+  <button data-cmd="help">help</button>
+  <button data-cmd="ls">ls</button>
+  <button data-cmd="search ">search …</button>
+  <button data-cmd="stats">stats</button>
+  <button data-cmd="clear">clear</button>
+</div>
+
+<footer id="statusbar" aria-hidden="true">
+  <span class="sb-left">⬡ akilas archive</span>
+  <span class="sb-center" id="sb-path">~</span>
+  <span class="sb-right"><span id="sb-files">…</span> · <span id="sb-clock">--:--</span></span>
+</footer>
+
+<script src="/terminal.js"></script>
+</body>
+</html>
