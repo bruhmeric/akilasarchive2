@@ -2,7 +2,9 @@ name: akilas-archive
 
 services:
   app:
-    build: ./app
+    build:
+      context: .
+      dockerfile: app/Dockerfile
     image: akilas-archive-app
     restart: unless-stopped
     env_file: .env

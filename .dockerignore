@@ -1,0 +1,18 @@
+# Keep the build context minimal and secret-free.
+# (context is the repo root — see docker-compose.yml)
+.env
+.env.*
+!.env.example
+data/
+.git/
+.gitignore
+node_modules/
+**/node_modules/
+.smoke-data/
+.auth-test-data/
+*.zip
+*.log
+README.md
+deploy.sh
+Caddyfile
+docker-compose.yml

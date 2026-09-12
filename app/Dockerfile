@@ -1,15 +1,17 @@
 # akilas archive — app image (lightweight: no build step, ~120MB RAM)
+# NOTE: build context is the REPO ROOT (see docker-compose.yml), so COPY
+# paths are relative to the repo root, not this file's directory.
 FROM node:22-slim
 
 ENV NODE_ENV=production
 WORKDIR /app
 
-COPY package.json package-lock.json* ./
+COPY app/package.json app/package-lock.json* ./
 RUN npm ci --omit=dev || npm install --omit=dev
 RUN npm cache clean --force
 
-COPY src ./src
-COPY public ./public
+COPY app/src ./src
+COPY app/public ./public
 COPY scripts ./scripts
 
 RUN mkdir -p /data && chown -R node:node /data /app
