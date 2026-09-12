@@ -4,7 +4,7 @@ import path from 'node:path'
 import { db, getSettings, setSetting, adminLog, getMeta } from '../db.js'
 import { status as indexerStatus, enqueueCategory } from '../indexer.js'
 import { testBucket } from '../r2.js'
-import { handleLogin, requireAdmin, getSessionId, destroySession, changePassword, passwordIsDefault } from '../auth.js'
+import { handleLogin, requireAdmin, getSessionId, destroySession, changePassword, passwordIsDefault, clearCookie } from '../auth.js'
 import { slugify, clientIp, clip } from '../util.js'
 import config from '../config.js'
 
@@ -15,7 +15,9 @@ adminRouter.post('/login', handleLogin)
 
 adminRouter.post('/logout', (req, res) => {
   destroySession(getSessionId(req))
-  res.setHeader('Set-Cookie', 'aa_sid=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0' + (config.cookieSecure ? '; Secure' : ''))
+  // Secure flag mirrors the request scheme so the delete actually matches
+  // the cookie the browser holds (see handleLogin for the full rationale).
+  res.setHeader('Set-Cookie', clearCookie(req.secure))
   res.json({ ok: true })
 })
 

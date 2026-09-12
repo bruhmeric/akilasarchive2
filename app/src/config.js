@@ -51,7 +51,7 @@ const config = {
   // ADMIN_PASSWORD_FORCE=1 → on boot, overwrite the stored (DB) password with
   // ADMIN_PASSWORD. Recovers you when the first boot seeded a different value.
   adminPasswordForce: /^(1|true|yes)$/i.test(envStr('ADMIN_PASSWORD_FORCE', '')),
-  cookieSecure: publicBaseUrl.startsWith('https://'),
+  cookieSecure: publicBaseUrl.startsWith('https://'), // legacy hint — cookie Secure flag is decided per-request from the actual scheme (req.secure)
 
   // --- behaviour ---
   tokenTtlMinutes: envInt('TOKEN_TTL_MINUTES', 10),

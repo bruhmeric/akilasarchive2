@@ -76,15 +76,42 @@
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault()
     const err = $('#login-err')
+    const btn = $('#login-form button[type=submit]')
     err.hidden = true
+    btn.disabled = true
+    const pw = $('#login-pw').value
     try {
-      await api('/admin/api/login', { method: 'POST', body: { password: $('#login-pw').value } })
+      // direct fetch (not api()): a 401 here must show the SERVER's message
+      // ("invalid password" / "locked — retry in N min"), not the generic
+      // unauthorized handler used for expired sessions.
+      const res = await fetch('/admin/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ password: pw })
+      })
+      let data = null
+      try { data = await res.json() } catch { /* not json */ }
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
       $('#login-pw').value = ''
+      // verify the session cookie actually persisted — previously a dropped
+      // cookie bounced the UI back here SILENTLY (looked like "nothing happens")
+      const check = await fetch('/admin/api/session', { credentials: 'same-origin' })
+      if (!check.ok) {
+        let hint = 'login accepted, but the session cookie was not kept by the browser'
+        if (data?.secure && location.protocol === 'http:') hint += ' — cookie was marked Secure over plain HTTP'
+        else hint += ' — are cookies blocked for this site?'
+        throw new Error(hint)
+      }
       showApp()
       await refreshAll()
     } catch (ex) {
-      err.textContent = '✗ ' + ex.message
+      $('#login-pw').value = pw
+      const msg = /Failed to fetch|NetworkError/i.test(ex.message) ? 'network error — site unreachable' : (ex.message || 'login failed')
+      err.textContent = '✗ ' + msg
       err.hidden = false
+    } finally {
+      btn.disabled = false
     }
   })
 

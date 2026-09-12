@@ -81,15 +81,15 @@ export function validSession (id) {
   return !!row && row.expires_at > Date.now()
 }
 
-export function sessionCookie (id) {
+export function sessionCookie (id, secure = false) {
   const parts = [`${COOKIE_NAME}=${id}`, 'Path=/', 'HttpOnly', 'SameSite=Strict', `Max-Age=${SESSION_TTL_MS / 1000}`]
-  if (config.cookieSecure) parts.push('Secure')
+  if (secure) parts.push('Secure')
   return parts.join('; ')
 }
 
-export function clearCookie () {
+export function clearCookie (secure = false) {
   const parts = [`${COOKIE_NAME}=`, 'Path=/', 'HttpOnly', 'SameSite=Strict', 'Max-Age=0']
-  if (config.cookieSecure) parts.push('Secure')
+  if (secure) parts.push('Secure')
   return parts.join('; ')
 }
 
@@ -121,6 +121,11 @@ export function handleLogin (req, res) {
   }
   const id = createSession()
   adminLog('login_ok', `ip ${ip}`)
-  res.setHeader('Set-Cookie', sessionCookie(id))
-  res.json({ ok: true })
+  // Secure flag comes from the ACTUAL request scheme (Caddy sends
+  // X-Forwarded-Proto; trust proxy is enabled). Deriving it from
+  // PUBLIC_BASE_URL broke login whenever the browser's scheme differed from
+  // the configured URL: the browser drops a Secure cookie on http, the next
+  // API call 401s, and the panel silently bounces back to the login form.
+  res.setHeader('Set-Cookie', sessionCookie(id, req.secure))
+  res.json({ ok: true, secure: !!req.secure })
 }
