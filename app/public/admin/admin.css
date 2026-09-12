@@ -13,6 +13,11 @@
   --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, "DejaVu Sans Mono", monospace;
 }
 * { box-sizing: border-box; }
+/* The hidden attribute must beat any author display declaration — browsers
+   implement [hidden] as a UA-stylesheet rule, which ANY author display (e.g.
+   .login-wrap flex, .app grid) silently overrides regardless of specificity.
+   Without this rule the admin panel can never leave the login screen. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);

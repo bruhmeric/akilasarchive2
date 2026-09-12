@@ -29,6 +29,11 @@ body[data-theme="ice"] {
 }
 
 * { box-sizing: border-box; }
+/* defensive: keep the hidden attribute authoritative over any author display
+   declaration (same gotcha patched in admin.css — UA [hidden] loses to any
+   author display rule). The terminal doesn't toggle hidden today; this guards
+   against future regressions. */
+[hidden] { display: none !important; }
 html, body { height: 100%; }
 body {
   margin: 0; background: var(--bg); color: var(--fg);
