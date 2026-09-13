@@ -67,6 +67,7 @@
     }
     for (const v of document.querySelectorAll('.view')) v.hidden = v.id !== 'view-' + name
     if (name === 'logs') loadLogs()
+    if (name === 'stats') loadStats()
   }
   document.querySelectorAll('.side nav button').forEach((b) => {
     b.addEventListener('click', () => switchView(b.dataset.view))
@@ -308,6 +309,97 @@
       $('#default-warn').hidden = true
     } catch (ex) { toast(ex.message, true) }
   })
+
+  // ── statistics ──
+  async function loadStats () {
+    let s
+    try {
+      s = await api('/admin/api/stats')
+    } catch (ex) {
+      $('#stats-cards').innerHTML = ''
+      toast(ex.message, true)
+      return
+    }
+    renderStats(s)
+  }
+
+  function barRows (rows) {
+    // rows → [{label, value, display}] with bar width relative to max
+    const max = Math.max(...rows.map(r => r.value), 1)
+    return rows.map(r => {
+      const w = Math.max(2, Math.round((r.value / max) * 100))
+      return `<div class="barrow">
+        <span class="barlabel" title="${esc(r.label)}">${esc(r.label)}</span>
+        <span class="bartrack"><span class="bar" style="width:${w}%"></span></span>
+        <span class="barval">${esc(r.display ?? fmtNum(r.value))}</span>
+      </div>`
+    }).join('') || '<div class="dim" style="padding:6px 0">no data</div>'
+  }
+
+  function renderStats (s) {
+    const t = s.totals || {}
+    // overview cards
+    const cards = [
+      ['files indexed', fmtNum(t.files)],
+      ['total size', fmtSize(t.bytes)],
+      ['average file', fmtSize(t.avg_size)],
+      ['categories', s.enabled_categories + ' / ' + (s.categories || []).length + ' enabled'],
+      ['links used', fmtNum(s.links?.retained?.used || 0) + ' · ' + fmtNum(s.links?.retained?.issued || 0) + ' issued'],
+      ['unique downloaders', fmtNum(s.links?.retained?.unique_ips || 0)]
+    ]
+    $('#stats-cards').innerHTML = cards.map(([k, v]) => `<div class="card"><div class="k">${esc(k)}</div><div class="v">${esc(v)}</div></div>`).join('')
+
+    // per-category table
+    const totalBytes = (s.categories || []).reduce((a, c) => a + (c.bytes || 0), 0) || 1
+    $('#stats-cats').innerHTML = '<tr><th>category</th><th>status</th><th class="num">files</th><th class="num">size</th><th class="num">avg</th><th class="num">% of archive</th><th>last index</th></tr>' +
+      (s.categories || []).map(c => {
+        const pct = ((c.bytes / totalBytes) * 100).toFixed(1)
+        const status = c.enabled ? '<span class="ok-cell">serving</span>' : '<span class="dim">disabled</span>'
+        const idx = c.last_error
+          ? `<span class="err-cell" title="${esc(c.last_error)}">✗ error</span>`
+          : `<span class="dim">${esc(fmtDate(c.last_index_at))}</span>`
+        return `<tr${c.enabled ? '' : ' style="opacity:.5"'}>
+          <td><b>${esc(c.name)}</b></td><td>${status}</td>
+          <td class="num">${fmtNum(c.files)}</td><td class="num">${fmtSize(c.bytes)}</td>
+          <td class="num">${fmtSize(c.avg_size)}</td><td class="num">${pct}%</td>
+          <td>${idx}</td></tr>`
+      }).join('') || '<tr><td class="dim">no categories</td></tr>'
+    $('#stats-cats-note').textContent = 'sorted by size · generated ' + fmtDate(s.generated_at)
+
+    // file types
+    $('#stats-ext').innerHTML = barRows(
+      (s.extensions || []).map(e => ({ label: '.' + e.ext, value: e.files, display: fmtNum(e.files) + ' · ' + fmtSize(e.bytes) })))
+
+    // size distribution
+    $('#stats-sizes').innerHTML = barRows(
+      (s.size_buckets || []).map(b => ({ label: b.bucket.replace(/^[0-9] /, ''), value: b.files, display: fmtNum(b.files) })))
+
+    // links per day (14d)
+    const l = s.links || {}
+    $('#stats-days').innerHTML = barRows(
+      (s.downloads_by_day || []).map(d => ({ label: d.day.slice(5), value: d.used, display: fmtNum(d.used) })))
+    $('#stats-links-note').textContent =
+      `24h: ${fmtNum(l.last_24h?.used || 0)} used / ${fmtNum(l.last_24h?.issued || 0)} issued · 7d: ${fmtNum(l.last_7d?.used || 0)} used / ${fmtNum(l.last_7d?.issued || 0)} issued · link records are pruned ~24h after expiry`
+
+    // top downloads / largest / newest
+    const fileTable = (head, rows, rowFn) => '<tr>' + head.map(h => `<th${h[1] ? ` class="${h[1]}"` : ''}>${h[0]}</th>`).join('') + '</tr>' +
+      (rows.length ? rows.map(rowFn).join('') : '<tr><td class="dim" colspan="' + head.length + '">no data yet</td></tr>')
+
+    $('#stats-top').innerHTML = fileTable(
+      [['file'], ['category'], ['downloads', 'num'], ['size', 'num']],
+      s.top_downloads || [],
+      f => `<tr><td style="overflow-wrap:anywhere">${esc(f.name)}</td><td class="dim">${esc(f.cat)}</td><td class="num">${fmtNum(f.downloads)}</td><td class="num">${fmtSize(f.size)}</td></tr>`)
+
+    $('#stats-largest').innerHTML = fileTable(
+      [['file'], ['category'], ['size', 'num']],
+      s.largest_files || [],
+      f => `<tr><td style="overflow-wrap:anywhere">${esc(f.name)}</td><td class="dim">${esc(f.cat)}</td><td class="num">${fmtSize(f.size)}</td></tr>`)
+
+    $('#stats-newest').innerHTML = fileTable(
+      [['file'], ['category'], ['size', 'num'], ['added/modified', '']],
+      s.newest_files || [],
+      f => `<tr><td style="overflow-wrap:anywhere">${esc(f.name)}</td><td class="dim">${esc(f.cat)}</td><td class="num">${fmtSize(f.size)}</td><td class="dim">${esc(fmtDate(f.mtime))}</td></tr>`)
+  }
 
   // ── logs ──
   async function loadLogs () {

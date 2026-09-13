@@ -28,6 +28,7 @@
     <div class="brand">⬡ akilas<span>archive</span></div>
     <nav>
       <button data-view="dash" class="on">dashboard</button>
+      <button data-view="stats">statistics</button>
       <button data-view="cats">categories</button>
       <button data-view="settings">settings</button>
       <button data-view="logs">log</button>
@@ -64,6 +65,49 @@
       <div class="panel">
         <div class="panel-head"><h3>categories</h3><span class="dim" id="cats-note"></span></div>
         <table class="tbl" id="dash-cats"></table>
+      </div>
+    </section>
+
+    <!-- statistics -->
+    <section id="view-stats" class="view" hidden>
+      <h2>statistics</h2>
+      <div class="cards" id="stats-cards"></div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>categories</h3><span class="dim" id="stats-cats-note"></span></div>
+        <table class="tbl" id="stats-cats"></table>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <div class="panel-head"><h3>file types</h3></div>
+          <div id="stats-ext" class="barlist"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>size distribution</h3></div>
+          <div id="stats-sizes" class="barlist"></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>one-time links · downloads per day (14 days)</h3><span class="dim" id="stats-links-note"></span></div>
+        <div id="stats-days" class="barlist"></div>
+      </div>
+
+      <div class="grid2">
+        <div class="panel">
+          <div class="panel-head"><h3>most downloaded</h3></div>
+          <table class="tbl" id="stats-top"></table>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h3>largest files</h3></div>
+          <table class="tbl" id="stats-largest"></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-head"><h3>newest files in the archive</h3></div>
+        <table class="tbl" id="stats-newest"></table>
       </div>
     </section>
 

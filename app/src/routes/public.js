@@ -142,29 +142,47 @@ publicRouter.get('/api/search', (req, res) => {
   const likePat = `%${escapeLike(q)}%`
 
   // --- pass 1: FTS full-text (word/prefix aware, ranked) ---
+  // FTS tokenizes BOTH sides identically (unicode61 splits . - _ and spaces),
+  // so "alice in" matches "Alice.in.Borderland..." — dots and spaces are the
+  // same token boundary. FILE_COLS references the categories alias, so this
+  // query MUST join categories; it was missing before, every FTS rows query
+  // threw "no such column: c.slug" and was silently swallowed — degrading ALL
+  // searches to LIKE substrings, which can never match across separators.
   let rows = null
   let total = 0
   const ftsQ = forceLike ? null : ftsQueryFor(q)
   if (ftsQ) {
     try {
-      const base = `FROM files_fts JOIN files f ON f.id = files_fts.rowid WHERE files_fts MATCH ? AND ${catIn}${filters}`
+      const base = `FROM files_fts JOIN files f ON f.id = files_fts.rowid JOIN categories c ON c.id = f.category_id WHERE files_fts MATCH ? AND ${catIn}${filters}`
       total = db.prepare(`SELECT COUNT(*) c ${base}`).get(ftsQ, ...catIds, ...filterParams).c
       if (total > 0) {
         rows = db.prepare(
           `SELECT ${FILE_COLS} ${base} ORDER BY ${orderBy} LIMIT ? OFFSET ?`
         ).all(ftsQ, ...catIds, ...filterParams, limit, offset)
       }
-    } catch { /* malformed fts — fall back */ }
+    } catch (e) {
+      // never swallow silently — a broken FTS pass must be visible in logs
+      console.error(`[search] fts pass failed (q=${clip(q, 60)}): ${e.message}`)
+    }
   }
 
-  // --- pass 2: substring LIKE fallback ---
+  // --- pass 2: substring LIKE fallback (multi-token, separator-insensitive) ---
+  // "alice in" → every token must appear as a substring of name or dir, so
+  // dotted/dashed/underscored names match too, not just exact-space names.
   if (!rows) {
+    const tokens = (q.toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? []).filter(t2 => t2.length > 0)
+    const cond = tokens.length
+      ? tokens.map(() => `(f.name LIKE ? ${LIKE_ESCAPE} OR f.dir LIKE ? ${LIKE_ESCAPE})`).join(' AND ')
+      : `(f.name LIKE ? ${LIKE_ESCAPE} OR f.dir LIKE ? ${LIKE_ESCAPE})`
+    const likePats = tokens.length
+      ? tokens.flatMap(t2 => [`%${escapeLike(t2)}%`, `%${escapeLike(t2)}%`])
+      : [likePat, likePat]
     const base = `FROM files f JOIN categories c ON c.id = f.category_id
-                  WHERE ${catIn}${filters} AND (f.name LIKE ? ${LIKE_ESCAPE} OR f.dir LIKE ? ${LIKE_ESCAPE})`
-    total = db.prepare(`SELECT COUNT(*) c ${base}`).get(...catIds, ...filterParams, likePat, likePat).c
+                  WHERE ${catIn}${filters} AND ${cond}`
+    total = db.prepare(`SELECT COUNT(*) c ${base}`).get(...catIds, ...filterParams, ...likePats).c
     const likeOrder = sort === 'size' || sort === 'date' || sort === 'name' ? orderBy : 'f.size DESC, f.name COLLATE NOCASE ASC'
     rows = db.prepare(`SELECT ${FILE_COLS} ${base} ORDER BY ${likeOrder} LIMIT ? OFFSET ?`)
-      .all(...catIds, ...filterParams, likePat, likePat, limit, offset)
+      .all(...catIds, ...filterParams, ...likePats, limit, offset)
   }
 
   res.json({

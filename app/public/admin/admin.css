@@ -146,8 +146,20 @@ h3 { margin: 0; font-size: 13px; letter-spacing: .1em; color: var(--dim); text-t
 }
 #toast.err { border-left-color: var(--red); }
 
+/* ── statistics ── */
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; align-items: start; }
+.barrow { display: grid; grid-template-columns: 120px 1fr 150px; align-items: center; gap: 10px; margin: 7px 0; font-size: 12.5px; }
+.barlabel { color: var(--dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
+.bartrack { background: rgba(255,255,255,.04); border-radius: 5px; overflow: hidden; display: block; }
+.bar { display: block; height: 10px; border-radius: 5px; background: linear-gradient(90deg, rgba(65,255,122,.35), var(--green)); min-width: 2px; }
+.barval { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ok-cell { color: var(--green); }
+
 @media (max-width: 780px) {
   .app { grid-template-columns: 1fr; }
+  .grid2 { grid-template-columns: 1fr; }
+  .barrow { grid-template-columns: 92px 1fr 96px; }
+  .barval { font-size: 11.5px; }
   .side { position: static; height: auto; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px; }
   .side nav { flex-direction: row; flex-wrap: wrap; }
   .brand { padding: 0 6px 0 0; }

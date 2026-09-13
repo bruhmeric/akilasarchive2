@@ -158,3 +158,101 @@ adminRouter.post('/password', (req, res) => {
 adminRouter.get('/logs', (req, res) => {
   res.json({ logs: db.prepare('SELECT at, action, detail FROM admin_log ORDER BY id DESC LIMIT 100').all() })
 })
+
+// ---------- statistics (comprehensive) ----------
+adminRouter.get('/stats', (req, res) => {
+  const now = Date.now()
+  const DAY = 86400e3
+  const since = ms => now - ms
+
+  // overall totals
+  const totals = db.prepare(
+    'SELECT COUNT(*) AS files, COALESCE(SUM(size),0) AS bytes, COALESCE(AVG(size),0) AS avg_size, COALESCE(MIN(mtime),0) AS oldest, COALESCE(MAX(mtime),0) AS newest FROM files'
+  ).get()
+  const cats = db.prepare(`
+    SELECT c.name, c.slug, c.enabled, c.file_count AS files, c.total_size AS bytes,
+           CASE WHEN c.file_count > 0 THEN c.total_size / c.file_count ELSE 0 END AS avg_size,
+           c.last_index_at, c.last_error
+    FROM categories c ORDER BY c.total_size DESC`).all()
+
+  // extension distribution (top 12 by count) — GROUP BY 1: ordinal, avoids the
+  // column/alias collision trap (the `ext` alias shadows the real ext column;
+  // ordinal also merges '' and NULL extensions into one "(none)" group)
+  const extensions = db.prepare(`
+    SELECT COALESCE(NULLIF(ext, ''), '(none)') AS ext, COUNT(*) AS files, COALESCE(SUM(size), 0) AS bytes
+    FROM files GROUP BY 1 ORDER BY files DESC, bytes DESC LIMIT 12`).all()
+
+  // size distribution histogram
+  // NOTE: GROUP BY 1 (ordinal), NOT "GROUP BY bucket" — the files table has a
+  // real column named `bucket` (the R2 bucket), which would shadow the CASE
+  // alias and group by R2 bucket instead of size class.
+  const sizeBuckets = db.prepare(`
+    SELECT CASE
+             WHEN size < 10485760        THEN '0 < 10 MB'
+             WHEN size < 104857600       THEN '1 10–100 MB'
+             WHEN size < 1073741824      THEN '2 100 MB–1 GB'
+             WHEN size < 10737418240     THEN '3 1–10 GB'
+             ELSE '4 > 10 GB' END AS bucket,
+           COUNT(*) AS files
+    FROM files GROUP BY 1 ORDER BY 1`).all()
+
+  // one-time link activity — NOTE: cleanup() prunes tokens ~24h after expiry,
+  // so "all time" here means "retained window"; label that in the UI.
+  const linkAll = db.prepare(
+    'SELECT COUNT(*) AS issued, COALESCE(SUM(used_at IS NOT NULL), 0) AS used, COUNT(DISTINCT CASE WHEN used_at IS NOT NULL THEN ip END) AS unique_ips FROM tokens'
+  ).get()
+  const link24 = db.prepare(
+    'SELECT COUNT(*) AS issued, COALESCE(SUM(used_at IS NOT NULL), 0) AS used FROM tokens WHERE created_at > ?'
+  ).get(since(DAY))
+  const link7 = db.prepare(
+    'SELECT COUNT(*) AS issued, COALESCE(SUM(used_at IS NOT NULL), 0) AS used FROM tokens WHERE created_at > ?'
+  ).get(since(7 * DAY))
+
+  // downloads per day, full 14-day series (fill gaps server-side)
+  const byDayRows = db.prepare(
+    "SELECT date(used_at / 1000, 'unixepoch', 'localtime') AS day, COUNT(*) AS used FROM tokens WHERE used_at > ? GROUP BY day ORDER BY day"
+  ).all(since(14 * DAY))
+  const byDay = []
+  for (let i = 13; i >= 0; i--) {
+    const d = new Date(now - i * DAY)
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    byDay.push({ day: key, used: byDayRows.find(r => r.day === key)?.used || 0 })
+  }
+
+  // most downloaded files
+  const topDownloads = db.prepare(`
+    SELECT f.name, c.name AS cat, f.size, COUNT(*) AS downloads
+    FROM tokens t JOIN files f ON f.id = t.file_id JOIN categories c ON c.id = f.category_id
+    WHERE t.used_at IS NOT NULL
+    GROUP BY t.file_id ORDER BY downloads DESC, f.size DESC LIMIT 10`).all()
+
+  // largest files
+  const largest = db.prepare(`
+    SELECT f.name, c.name AS cat, f.size FROM files f JOIN categories c ON c.id = f.category_id
+    ORDER BY f.size DESC LIMIT 10`).all()
+
+  // newest files (by source mtime)
+  const newest = db.prepare(`
+    SELECT f.name, c.name AS cat, f.size, f.mtime FROM files f JOIN categories c ON c.id = f.category_id
+    ORDER BY f.mtime DESC LIMIT 10`).all()
+
+  // admin activity, last 7 days
+  const log7 = db.prepare(
+    "SELECT COUNT(*) AS events, COALESCE(SUM(action = 'login_fail'), 0) AS login_fails, COALESCE(SUM(action = 'login_ok'), 0) AS logins FROM admin_log WHERE at > ?"
+  ).get(since(7 * DAY))
+
+  res.json({
+    generated_at: now,
+    totals,
+    categories: cats,
+    enabled_categories: cats.filter(c => c.enabled).length,
+    extensions,
+    size_buckets: sizeBuckets,
+    links: { retained: linkAll, last_24h: link24, last_7d: link7 },
+    downloads_by_day: byDay,
+    top_downloads: topDownloads,
+    largest_files: largest,
+    newest_files: newest,
+    admin_log_7d: log7
+  })
+})
