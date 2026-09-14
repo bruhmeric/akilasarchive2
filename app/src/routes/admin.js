@@ -2,7 +2,7 @@ import { Router } from 'express'
 import fs from 'node:fs'
 import path from 'node:path'
 import { db, getSettings, setSetting, adminLog, getMeta } from '../db.js'
-import { status as indexerStatus, enqueueCategory } from '../indexer.js'
+import { status as indexerStatus, enqueueCategory, renumberFiles } from '../indexer.js'
 import { testBucket } from '../r2.js'
 import { handleLogin, requireAdmin, getSessionId, destroySession, changePassword, passwordIsDefault, clearCookie } from '../auth.js'
 import { slugify, clientIp, clip } from '../util.js'
@@ -99,6 +99,8 @@ adminRouter.delete('/categories/:id', (req, res) => {
   const cat = getCat(req.params.id)
   if (!cat) return res.status(404).json({ error: 'not_found' })
   db.prepare('DELETE FROM categories WHERE id = ?').run(cat.id) // files cascade + FTS triggers
+  // the cascade just punched a hole in the 1..N id sequence — compact it back
+  try { renumberFiles() } catch (e) { console.error('[admin] renumber after category delete failed:', e.message) }
   adminLog('cat_del', `"${cat.name}" (bucket "${cat.bucket}") removed`)
   res.json({ ok: true })
 })

@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import config from './config.js'
 import { db, cleanup, getSettings } from './db.js'
 import { seedAdminPassword } from './auth.js'
-import { startScheduler } from './indexer.js'
+import { startScheduler, compactFileIdsAtBoot } from './indexer.js'
 import { publicRouter } from './routes/public.js'
 import { adminRouter } from './routes/admin.js'
 import { rateLimit } from './util.js'
@@ -75,12 +75,17 @@ function clipErr (e) {
 // ---------- boot ----------
 seedAdminPassword()
 
+// one-shot: compact file ids to 1..N if an older DB (or a mid-run crash) left
+// them climbing — no-op when ids are already contiguous
+const compactedIds = compactFileIdsAtBoot()
+
 const server = app.listen(config.port, '0.0.0.0', () => {
   console.log('─'.repeat(56))
   console.log(`  ${config.name} v${config.version}`)
   console.log(`  listening on :${config.port}  (behind Caddy on 80/443)`)
   console.log(`  dl mode: ${config.dlMode} → ${config.downloadBaseUrl}`)
   console.log(`  index interval: ${getSettings().index_interval_hours}h`)
+  if (compactedIds) console.log(`  file ids compacted → 1..${compactedIds} (ids now match the archive size)`)
   for (const line of turnstileBootHints()) console.log(line)
   console.log('─'.repeat(56))
 })
