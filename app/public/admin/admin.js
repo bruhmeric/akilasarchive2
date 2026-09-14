@@ -1,5 +1,5 @@
 /* akilas archive · root console — vanilla JS */
-/* global document, fetch, setInterval, location */
+/* global document, fetch, setInterval, location, window */
 (() => {
   'use strict'
 
@@ -55,6 +55,7 @@
     $('#login').hidden = false
     $('#app').hidden = true
     $('#login-pw').focus()
+    initTurnstile()
   }
   function showApp () {
     $('#login').hidden = true
@@ -73,6 +74,74 @@
     b.addEventListener('click', () => switchView(b.dataset.view))
   })
 
+  // ── Cloudflare Turnstile (login human verification) ──
+  // The server owns the config (TURNSTILE_SITE_KEY / TURNSTILE_SECRET) and
+  // exposes the PUBLIC site key at /admin/api/turnstile; the widget renders
+  // only when that key exists. Tokens are single-use: after any failed login
+  // the widget is reset so the next attempt gets a fresh one (canonical
+  // lifecycle from the Turnstile integration guide).
+  const TURNSTILE = { siteKey: null, enforced: false, widgetId: null, scriptPromise: null }
+
+  async function initTurnstile () {
+    if (TURNSTILE.siteKey !== null) return // already resolved (fetch once per page)
+    try {
+      const res = await fetch('/admin/api/turnstile', { credentials: 'same-origin' })
+      if (!res.ok) return
+      const data = await res.json()
+      TURNSTILE.siteKey = data.site_key || null
+      TURNSTILE.enforced = !!data.enforced
+    } catch { return } // offline / proxy hiccup — the server 403 will explain
+    if (!TURNSTILE.siteKey) return
+    const box = $('#turnstile')
+    if (!box) return
+    box.hidden = false
+    loadTurnstileApi().then(renderTurnstile).catch(() => { /* script failed — submit will surface it */ })
+  }
+
+  function loadTurnstileApi () {
+    if (window.turnstile) return Promise.resolve() // already loaded (or mocked)
+    if (TURNSTILE.scriptPromise) return TURNSTILE.scriptPromise
+    TURNSTILE.scriptPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script')
+      s.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit'
+      s.async = true
+      s.onload = () => resolve()
+      s.onerror = () => reject(new Error('turnstile script failed to load'))
+      document.head.appendChild(s)
+    })
+    return TURNSTILE.scriptPromise
+  }
+
+  function renderTurnstile () {
+    if (!window.turnstile || TURNSTILE.widgetId !== null) return
+    const el = $('#turnstile')
+    if (!el || !TURNSTILE.siteKey) return
+    TURNSTILE.widgetId = window.turnstile.render(el, {
+      sitekey: TURNSTILE.siteKey,
+      action: 'login',
+      theme: 'dark',
+      size: 'flexible',
+      callback: () => { $('#login-err').hidden = true } // solved → clear stale error
+    })
+  }
+
+  function turnstileToken () {
+    if (TURNSTILE.widgetId === null || !window.turnstile) return null
+    try { return window.turnstile.getResponse(TURNSTILE.widgetId) || null } catch { return null }
+  }
+
+  // single-use tokens: every failed attempt must re-challenge
+  function resetTurnstile () {
+    if (TURNSTILE.widgetId === null || !window.turnstile) return
+    try { window.turnstile.reset(TURNSTILE.widgetId) } catch { /* ignore */ }
+  }
+
+  function removeTurnstile () {
+    if (TURNSTILE.widgetId === null || !window.turnstile) return
+    try { window.turnstile.remove(TURNSTILE.widgetId) } catch { /* ignore */ }
+    TURNSTILE.widgetId = null
+  }
+
   // ── login ──
   $('#login-form').addEventListener('submit', async (e) => {
     e.preventDefault()
@@ -81,19 +150,31 @@
     err.hidden = true
     btn.disabled = true
     const pw = $('#login-pw').value
+
+    // captcha gate client-side: don't even send a request without a token
+    const tsToken = turnstileToken()
+    if (TURNSTILE.siteKey && !tsToken) {
+      btn.disabled = false
+      err.textContent = '✗ ' + (TURNSTILE.widgetId === null
+        ? 'verification required, but the widget could not load — check TURNSTILE_SITE_KEY / reload'
+        : 'complete the human verification first')
+      err.hidden = false
+      return
+    }
+
     try {
       // direct fetch (not api()): a 401 here must show the SERVER's message
-      // ("invalid password" / "locked — retry in N min"), not the generic
-      // unauthorized handler used for expired sessions.
+      // ("invalid password" / "locked — retry in N min" / captcha 403s), not the
+      // generic unauthorized handler used for expired sessions.
       const res = await fetch('/admin/api/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'same-origin',
-        body: JSON.stringify({ password: pw })
+        body: JSON.stringify(tsToken ? { password: pw, 'cf-turnstile-response': tsToken } : { password: pw })
       })
       let data = null
       try { data = await res.json() } catch { /* not json */ }
-      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`)
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`) // catch block resets the widget (single-use token)
       $('#login-pw').value = ''
       // verify the session cookie actually persisted — previously a dropped
       // cookie bounced the UI back here SILENTLY (looked like "nothing happens")
@@ -105,9 +186,11 @@
         throw new Error(hint)
       }
       showApp()
+      removeTurnstile()
       await refreshAll()
     } catch (ex) {
       $('#login-pw').value = pw
+      resetTurnstile()
       const msg = /Failed to fetch|NetworkError/i.test(ex.message) ? 'network error — site unreachable' : (ex.message || 'login failed')
       err.textContent = '✗ ' + msg
       err.hidden = false
@@ -162,9 +245,11 @@
     $('#s-expiry').value = s.settings.dl_expiry_sec
 
     // env info
+    const t = s.turnstile
     $('#env-info').innerHTML = [
       ['download gateway', s.dl_mode + ' → ' + s.download_base],
       ['cloudflare account', s.r2_account],
+      ['login captcha', t && t.enabled ? 'turnstile on · ' + (t.hostnames || []).join(', ') : 'off'],
       ['re-index interval', s.settings.index_interval_hours + 'h'],
       ['one-time link TTL', s.settings.token_ttl_min + ' min'],
       ['download window', s.settings.dl_expiry_sec + ' s']

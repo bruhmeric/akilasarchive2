@@ -55,7 +55,33 @@ const config = {
 
   // --- behaviour ---
   tokenTtlMinutes: envInt('TOKEN_TTL_MINUTES', 10),
-  indexIntervalHours: envInt('INDEX_INTERVAL_HOURS', 6)
+  indexIntervalHours: envInt('INDEX_INTERVAL_HOURS', 6),
+
+  // --- Cloudflare Turnstile (bot gate on the admin login; optional) ---
+  // Widget is created in the Cloudflare dashboard (Turnstile → Add widget).
+  //   TURNSTILE_SITE_KEY  public key → renders the widget on the login card
+  //   TURNSTILE_SECRET    private key → server-side siteverify (login is then
+  //                       REJECTED without a valid token — fail-closed)
+  //   TURNSTILE_HOSTNAMES comma-separated hostname allowlist; defaults to the
+  //                       hostname of PUBLIC_BASE_URL (e.g. akilasarchive.site)
+  turnstile: {
+    siteKey: envStr('TURNSTILE_SITE_KEY', ''),
+    secret: envStr('TURNSTILE_SECRET', ''),
+    hostnames: envStr('TURNSTILE_HOSTNAMES', '')
+      .split(',')
+      .map((h) => h.trim().toLowerCase())
+      .filter(Boolean),
+    // canonical endpoint; overridable ONLY for local test harnesses
+    verifyUrl: envStr('TURNSTILE_SITEVERIFY_URL', 'https://challenges.cloudflare.com/turnstile/v0/siteverify')
+  }
+}
+
+// fallback allowlist: the hostname the site is actually served from, so the
+// widget works with zero extra config on the standard deployment
+if (config.turnstile.hostnames.length === 0) {
+  try {
+    config.turnstile.hostnames = [new URL(publicBaseUrl).hostname.toLowerCase()]
+  } catch { /* leave empty — turnstile.js warns at boot and fails closed */ }
 }
 
 config.r2.endpoint = `https://${config.r2.accountId}.r2.cloudflarestorage.com`

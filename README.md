@@ -145,10 +145,50 @@ git pull && ./deploy.sh
 | `ADMIN_PASSWORD_FORCE` | `1` = overwrite the stored password from `ADMIN_PASSWORD` on next boot (recovery only, remove after) |
 | `DOWNLOAD_BASE_URL` | `https://dl.akilasarchive.site` or the workers.dev URL |
 | `DL_MODE` | `worker` (recommended) or `presign` fallback |
+| `TURNSTILE_SITE_KEY` | public site key of your Turnstile widget (shows the CAPTCHA on the admin login) |
+| `TURNSTILE_SECRET` | the widget's **Secret Key** from the Cloudflare dashboard — while empty, verification is OFF |
+| `TURNSTILE_HOSTNAMES` | optional comma-separated hostname allowlist; default = hostname of `PUBLIC_BASE_URL` |
 
 ## 5 · Configure your categories
 
 Open **`https://akilasarchive.site/admin`** and log in.
+
+### 5a (optional) · Turnstile CAPTCHA on the admin login
+
+A Cloudflare Turnstile widget protects the admin login from bots and
+credential-stuffing. The widget is already created in your Cloudflare
+dashboard (Turnstile → your widget → site key `0x4AAAAAAE0HtN4t0uQjFGW1`).
+To enable it end-to-end:
+
+1. **Widget domains** — in the dashboard, make sure the widget lists
+   `akilasarchive.site` (add it if missing, then save). If you also want to
+   test from `localhost`, add `localhost` there too — but never add it to
+   `TURNSTILE_HOSTNAMES` in production.
+2. **`.env` on the VPS** — set both keys:
+   ```bash
+   TURNSTILE_SITE_KEY=0x4AAAAAAE0HtN4t0uQjFGW1
+   TURNSTILE_SECRET=<Secret Key from dashboard → Turnstile → your widget>
+   docker compose up -d   # picks up the new env
+   ```
+   Keep the secret only in `.env` (it is git-ignored) — never in chat,
+   issues or anywhere else.
+3. **Verify**: open `/admin` — the widget appears under the password field;
+   after logging in, **settings → deployment** shows `login captcha:
+   turnstile on · akilasarchive.site`.
+
+How it behaves:
+
+- With only `TURNSTILE_SITE_KEY` set, the widget renders but the server does
+  not enforce it (migration-safe; the boot log says so).
+- With `TURNSTILE_SECRET` set, every login is **rejected** unless the token
+  passes Cloudflare's siteverify (success + action `login` + hostname in the
+  allowlist). Captcha failures are logged as `login_captcha` in the activity
+  log; they never consume the 6-attempt password lockout.
+- If siteverify is unreachable, login fails closed (`captcha verification
+  unavailable`) — retry shortly; this is the canonical Turnstile behavior.
+- Removing both vars restores the previous login flow, widget included.
+
+**Admin panel basics** (the usual workflow):
 
 - **Categories → add category**: e.g. name `Movies`, bucket `movies`.
   The panel tests the bucket against R2 immediately, then starts indexing.
@@ -213,6 +253,9 @@ Backups: everything durable lives in `./data/archive.db` (SQLite) + `.env`.
 | **admin login rejects the `.env` password** | **`ADMIN_PASSWORD` is only read on the very first boot** — afterwards the password lives in the database (`./data/archive.db`) and editing `.env` does nothing. Two fixes: (a) add `ADMIN_PASSWORD_FORCE=1` to `.env`, set `ADMIN_PASSWORD` to the desired value, `docker compose up -d`, log in, then remove the force flag; or (b) hot-reset without restarting: `docker compose exec app node scripts/reset-password.js 'MyNewPass123'`. Also note: 6 failed attempts lock your IP out for 15 minutes ("locked — retry in N min") — a restart clears it immediately. |
 | admin login says "locked — retry in N min" | brute-force lockout (15 min). Wait it out, or clear instantly with `docker compose restart app`. |
 | admin "R2 list failed" on add | wrong bucket name, or token scope/permissions — test with `aws s3 ls --endpoint https://<acct>.r2.cloudflarestorage.com` or rclone. |
+| admin login says "captcha required — complete the human verification" but no widget appears | `TURNSTILE_SECRET` is set but `TURNSTILE_SITE_KEY` is missing/typo'd in `.env` — the server enforces the gate while the widget cannot render. Fix the site key, or clear `TURNSTILE_SECRET` to disable. |
+| admin login says "captcha verification failed — retry" | token rejected by siteverify: most common cause is the widget's domain list not containing the hostname you're visiting (dashboard → Turnstile → widget → domains), or the hostname allowlist (`TURNSTILE_HOSTNAMES`, default `akilasarchive.site` from `PUBLIC_BASE_URL`) mismatching. |
+| admin login says "captcha verification unavailable" | the VPS could not reach `challenges.cloudflare.com` (outbound network/DNS) — login fails closed by design; retry once connectivity is back. |
 | terminal shows volumes but "no volumes mounted yet" | categories not added/enabled in admin, or index still running — check dashboard. |
 | `/get/<link>` → 403 invalid signature | `DOWNLOAD_SECRET` differs between `.env` (VPS) and the worker secret — re-run `wrangler secret put`. |
 | `/get/<link>` → worker 500 misconfigured | worker missing `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_ACCOUNT_ID`. |
@@ -228,7 +271,8 @@ Backups: everything durable lives in `./data/archive.db` (SQLite) + `.env`.
 - One-time links: single-use, short-lived, redeemable once, then HTTP 410.
 - Admin: scrypt-hashed password, HttpOnly+SameSite cookie, login rate
   limiting + lockout, audit log; `/admin` is `noindex` and blocked in
-  `robots.txt`.
+  `robots.txt`. Optional Cloudflare Turnstile CAPTCHA gates the login
+  (siteverify is validated server-side, fail-closed — see section 5a).
 - The app runs as an unprivileged user; SQLite lives in `./data`.
 
 ## Local demo (no R2 needed)

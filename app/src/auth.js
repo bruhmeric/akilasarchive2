@@ -2,6 +2,7 @@ import crypto from 'node:crypto'
 import { db, adminLog } from './db.js'
 import config from './config.js'
 import { parseCookies, rateLimit, scryptHash, scryptVerify, clientIp } from './util.js'
+import { turnstileEnabled, verifyLoginToken } from './turnstile.js'
 
 const COOKIE_NAME = 'aa_sid'
 const SESSION_TTL_MS = 12 * 3600e3
@@ -105,12 +106,37 @@ export function requireAdmin (req, res, next) {
   next()
 }
 
-export function handleLogin (req, res) {
+// human-readable server messages for each captcha failure mode (the SPA
+// shows these verbatim, like the password errors)
+const CAPTCHA_ERRORS = {
+  missing: 'captcha required — complete the human verification',
+  malformed: 'captcha token malformed',
+  invalid: 'captcha verification failed — retry',
+  unreachable: 'captcha verification unavailable — try again shortly'
+}
+
+export async function handleLogin (req, res) {
   const ip = clientIp(req)
   const lim = rateLimit({ windowMs: 60e3, max: 10, key: `login:${ip}` })
   const lock = loginAllowed(ip)
   if (!lock.ok) return res.status(429).json({ error: `locked — retry in ${Math.ceil(lock.retryAfter / 60)} min` })
   if (!lim.ok) return res.status(429).json({ error: 'too many attempts — slow down' })
+
+  // Turnstile gate (canonical siteverify): runs BEFORE the password check so
+  // bots can never attempt passwords, but AFTER the local rate-limiters so a
+  // flood of garbage tokens cannot relay through us to siteverify. Captcha
+  // failures do NOT consume password attempts (loginFailed is only called for
+  // real password misses below).
+  if (turnstileEnabled()) {
+    const verdict = await verifyLoginToken(req.body?.['cf-turnstile-response'], ip)
+    if (!verdict.ok) {
+      adminLog('login_captcha', `ip ${ip} · ${verdict.reason}`)
+      return res.status(403).json({
+        error: CAPTCHA_ERRORS[verdict.reason] || 'captcha verification failed',
+        captcha: true
+      })
+    }
+  }
 
   const password = String(req.body?.password ?? '')
   const row = db.prepare('SELECT v FROM meta WHERE k = ?').get('admin_password')

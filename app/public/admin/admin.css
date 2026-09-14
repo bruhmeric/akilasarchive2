@@ -48,6 +48,10 @@ code { color: var(--cyan); }
 }
 .login-card button:hover { filter: brightness(1.1); }
 .login-err { color: var(--red); font-size: 12.5px; margin-top: 12px; }
+/* Cloudflare Turnstile widget (rendered inside #turnstile when configured).
+   size:flexible makes the iframe fill the card's 280px content width. */
+.turnstile { margin-top: 14px; display: flex; justify-content: center; overflow: hidden; }
+.turnstile iframe { border: 0; max-width: 100%; }
 
 /* ── layout ── */
 .app { display: grid; grid-template-columns: 210px 1fr; min-height: 100vh; }

@@ -6,12 +6,25 @@ import { status as indexerStatus, enqueueCategory } from '../indexer.js'
 import { testBucket } from '../r2.js'
 import { handleLogin, requireAdmin, getSessionId, destroySession, changePassword, passwordIsDefault, clearCookie } from '../auth.js'
 import { slugify, clientIp, clip } from '../util.js'
+import { turnstileStatus } from '../turnstile.js'
 import config from '../config.js'
 
 export const adminRouter = Router()
 
 // ---------- auth ----------
 adminRouter.post('/login', handleLogin)
+
+// Turnstile config for the login screen. Unauthenticated by design — the site
+// key is public (normally embedded straight into page HTML); the SECRET never
+// leaves the server. `enforced` lets the SPA give an accurate message when the
+// server expects a token but no widget could be rendered.
+adminRouter.get('/turnstile', (req, res) => {
+  res.json({
+    site_key: config.turnstile.siteKey || null,
+    action: 'login',
+    enforced: turnstileStatus().enabled
+  })
+})
 
 adminRouter.post('/logout', (req, res) => {
   destroySession(getSessionId(req))
@@ -124,7 +137,8 @@ adminRouter.get('/status', (req, res) => {
     download_base: config.downloadBaseUrl,
     r2_account: config.r2.accountId,
     uptime_s: Math.floor(process.uptime()),
-    password_is_default: passwordIsDefault()
+    password_is_default: passwordIsDefault(),
+    turnstile: turnstileStatus()
   })
 })
 

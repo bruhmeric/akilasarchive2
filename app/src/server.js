@@ -8,6 +8,7 @@ import { startScheduler } from './indexer.js'
 import { publicRouter } from './routes/public.js'
 import { adminRouter } from './routes/admin.js'
 import { rateLimit } from './util.js'
+import { bootHints as turnstileBootHints } from './turnstile.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const publicDir = path.join(__dirname, '..', 'public')
@@ -80,6 +81,7 @@ const server = app.listen(config.port, '0.0.0.0', () => {
   console.log(`  listening on :${config.port}  (behind Caddy on 80/443)`)
   console.log(`  dl mode: ${config.dlMode} → ${config.downloadBaseUrl}`)
   console.log(`  index interval: ${getSettings().index_interval_hours}h`)
+  for (const line of turnstileBootHints()) console.log(line)
   console.log('─'.repeat(56))
 })
 
