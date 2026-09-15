@@ -80,13 +80,46 @@
   // only when that key exists. Tokens are single-use: after any failed login
   // the widget is reset so the next attempt gets a fresh one (canonical
   // lifecycle from the Turnstile integration guide).
-  const TURNSTILE = { siteKey: null, enforced: false, problem: null, widgetId: null, scriptPromise: null, scriptError: false }
+  const TURNSTILE = { siteKey: null, enforced: false, problem: null, widgetId: null, widgetError: null, scriptPromise: null, scriptError: false }
 
   function loginError (msg) {
     const err = $('#login-err')
     if (!err) return
     err.textContent = '✗ ' + msg
     err.hidden = false
+  }
+
+  // Turnstile client-side error codes, from the official table:
+  // developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+  // The widget itself can fail AFTER it renders (bad key, domain not
+  // authorized, blocked iframe…). Without translating the code, the widget
+  // just shows Cloudflare's generic "troubleshoot" link and the login looks
+  // undiagnosable — exactly what a 110200 hostname mismatch looks like.
+  function explainTurnstileError (code) {
+    const c = Number(code) || 0
+    if (c === 110200) {
+      return 'captcha error 110200 — ' + (location.hostname || 'this host') +
+        ' is not in the widget\u2019s Hostname Management. Cloudflare dashboard → Turnstile → widget → Hostnames → add it, save, then reload this page'
+    }
+    if (c === 110100 || c === 110110 || c === 400020) {
+      return 'captcha error ' + c + ' — the site key is invalid/not found. Re-copy TURNSTILE_SITE_KEY from dashboard → Turnstile → widget → Site Key, then restart the app'
+    }
+    if (c === 400070) {
+      return 'captcha error 400070 — the Turnstile widget is disabled in the Cloudflare dashboard (Turnstile → widget → re-enable it)'
+    }
+    if (c === 200500) {
+      return 'captcha error 200500 — the verification iframe could not load; an ad blocker or network issue is blocking challenges.cloudflare.com'
+    }
+    if (c === 200100) {
+      return 'captcha error 200100 — the system clock is wrong or a proxy cached the challenge; check the clock and hard-reload'
+    }
+    if (c === 110600 || c === 110620) {
+      return 'captcha error ' + c + ' — the challenge timed out and will restart; solve it before submitting'
+    }
+    if (Math.floor(c / 1000) === 300 || Math.floor(c / 1000) === 600) {
+      return 'captcha error ' + c + ' — the challenge was refused (bot heuristics). Retry, possibly in another browser'
+    }
+    return 'captcha error ' + c + ' — see developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/'
   }
 
   async function initTurnstile () {
@@ -145,7 +178,22 @@
       action: 'login',
       theme: 'dark',
       size: 'flexible',
-      callback: () => { $('#login-err').hidden = true } // solved → clear stale error
+      callback: () => { // solved → clear stale error
+        TURNSTILE.widgetError = null
+        $('#login-err').hidden = true
+      },
+      // the widget itself errored (sitekey bad, domain not authorized, iframe
+      // blocked…). With no error-callback Turnstile THROWS a JS exception and
+      // the card stays silent — this is what makes a "troubleshoot" widget
+      // diagnosable: the exact code + fix goes on the login card.
+      'error-callback': (code) => {
+        TURNSTILE.widgetError = code
+        loginError(explainTurnstileError(code))
+        return true // handled — suppress the uncaught exception
+      },
+      // token expired while the user idled → fetch a fresh challenge
+      'expired-callback': () => { resetTurnstile() },
+      'timeout-callback': () => { loginError('the human verification timed out — it restarts automatically, solve it before logging in') }
     })
   }
 
@@ -157,6 +205,7 @@
   // single-use tokens: every failed attempt must re-challenge
   function resetTurnstile () {
     if (TURNSTILE.widgetId === null || !window.turnstile || typeof window.turnstile.reset !== 'function') return
+    TURNSTILE.widgetError = null // a reset is a fresh challenge — stale codes mislead the submit gate
     try { window.turnstile.reset(TURNSTILE.widgetId) } catch { /* ignore */ }
   }
 
@@ -186,6 +235,8 @@
         msg = TURNSTILE.problem || 'captcha required by the server, but TURNSTILE_SITE_KEY is missing — add it to .env and restart'
       } else if (TURNSTILE.scriptError) {
         msg = 'captcha widget failed to load — an ad blocker or network issue is blocking challenges.cloudflare.com'
+      } else if (TURNSTILE.widgetError !== null) {
+        msg = explainTurnstileError(TURNSTILE.widgetError)
       } else if (TURNSTILE.widgetId === null) {
         msg = 'verification required, but the widget could not load — check TURNSTILE_SITE_KEY / reload'
       } else {

@@ -160,9 +160,14 @@ credential-stuffing. The widget is already created in your Cloudflare
 dashboard (Turnstile → your widget → site key `0x4AAAAAAE0HtN4t0uQjFGW1`).
 To enable it end-to-end:
 
-1. **Widget domains** — in the dashboard, make sure the widget lists
-   `akilasarchive.site` (add it if missing, then save). If you also want to
-   test from `localhost`, add `localhost` there too — but never add it to
+1. **Widget hostnames** — Cloudflare dashboard → **Turnstile → your widget
+   → Hostname Management**: add `akilasarchive.site` (the exact hostname
+   your browser shows on `/admin`), then **save**. This list is checked by
+   the widget itself when it renders — a missing hostname makes the widget
+   appear but fail with Cloudflare error **110200 (domain not authorized)**,
+   visible as a generic "troubleshoot" link inside the widget box. The login
+   card prints the exact error code + fix when this happens. If you also want
+   to test from `localhost`, add `localhost` there too — but never add it to
    `TURNSTILE_HOSTNAMES` in production.
 2. **`.env` on the VPS** — set both keys:
    ```bash
@@ -186,6 +191,10 @@ How it behaves:
   log; they never consume the 6-attempt password lockout.
 - If siteverify is unreachable, login fails closed (`captcha verification
   unavailable`) — retry shortly; this is the canonical Turnstile behavior.
+- Widget-side failures surface on the login card with the official Turnstile
+  error code and a fix (e.g. `110200` hostname not in the widget's Hostname
+  Management, `110100/400020` bad site key, `400070` disabled widget,
+  `200500` blocked iframe). Expired tokens re-challenge automatically.
 - Removing both vars restores the previous login flow, widget included.
 
 **Admin panel basics** (the usual workflow):
@@ -254,6 +263,7 @@ Backups: everything durable lives in `./data/archive.db` (SQLite) + `.env`.
 | admin login says "locked — retry in N min" | brute-force lockout (15 min). Wait it out, or clear instantly with `docker compose restart app`. |
 | admin "R2 list failed" on add | wrong bucket name, or token scope/permissions — test with `aws s3 ls --endpoint https://<acct>.r2.cloudflarestorage.com` or rclone. |
 | admin login says "captcha required — complete the human verification" but no widget appears | `TURNSTILE_SECRET` is set but `TURNSTILE_SITE_KEY` is missing/typo'd in `.env` — the login card names this exact problem in current versions. Also: older `admin.js` had a bug where the widget could NEVER load (a `<div id="turnstile">` collides with the `window.turnstile` API name) — update to the latest release (`git pull && ./deploy.sh`) and hard-refresh. |
+| widget shows an error / "troubleshoot" link, no verification happens | Cloudflare error **110200 — domain not authorized**: the hostname in your address bar is not in the widget's Hostname Management. Dashboard → Turnstile → widget → Hostnames → add `akilasarchive.site` (and `www.` variants if used) → save → hard-refresh. (The login card prints the exact code; other codes: `110100/400020` bad site key, `400070` widget disabled, `200500` blocked iframe.) |
 | admin login says "captcha verification failed — retry" | token rejected by siteverify: most common cause is the widget's domain list not containing the hostname you're visiting (dashboard → Turnstile → widget → domains), or the hostname allowlist (`TURNSTILE_HOSTNAMES`, default `akilasarchive.site` from `PUBLIC_BASE_URL`) mismatching. |
 | admin login says "captcha verification unavailable" | the VPS could not reach `challenges.cloudflare.com` (outbound network/DNS) — login fails closed by design; retry once connectivity is back. |
 | terminal shows volumes but "no volumes mounted yet" | categories not added/enabled in admin, or index still running — check dashboard. |
