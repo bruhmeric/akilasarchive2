@@ -131,10 +131,14 @@ export async function handleLogin (req, res) {
     const verdict = await verifyLoginToken(req.body?.['cf-turnstile-response'], ip)
     if (!verdict.ok) {
       adminLog('login_captcha', `ip ${ip} · ${verdict.reason}`)
-      return res.status(403).json({
-        error: CAPTCHA_ERRORS[verdict.reason] || 'captcha verification failed',
-        captcha: true
-      })
+      let msg = CAPTCHA_ERRORS[verdict.reason] || 'captcha verification failed'
+      // self-lockout guard: without a site key the widget can NEVER render, so
+      // "complete the human verification" would be impossible advice — name
+      // the actual misconfiguration instead
+      if (verdict.reason === 'missing' && !config.turnstile.siteKey) {
+        msg = 'captcha required, but TURNSTILE_SITE_KEY is not set — the widget cannot render. Add it to .env and restart, or remove TURNSTILE_SECRET to disable the gate'
+      }
+      return res.status(403).json({ error: msg, captcha: true })
     }
   }
 

@@ -18,8 +18,13 @@
     <p class="login-sub">root console — authenticate</p>
     <input id="login-pw" type="password" placeholder="admin password" autocomplete="current-password" autofocus>
     <!-- Cloudflare Turnstile human verification — rendered by admin.js only
-         when TURNSTILE_SITE_KEY is configured server-side -->
-    <div id="turnstile" class="turnstile" hidden></div>
+         when TURNSTILE_SITE_KEY is configured server-side.
+         ⚠ the id MUST NOT be "turnstile": browsers expose every id'd element
+         as a window property, so <div id="turnstile"> would make
+         window.turnstile truthy BEFORE the api.js script loads — and
+         loadTurnstileApi()'s "already loaded" guard would skip loading it,
+         so the widget could never render. -->
+    <div id="turnstile-box" class="turnstile" hidden></div>
     <button type="submit">login</button>
     <div id="login-err" class="login-err" hidden></div>
   </form>

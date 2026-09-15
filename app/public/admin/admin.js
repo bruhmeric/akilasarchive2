@@ -80,7 +80,14 @@
   // only when that key exists. Tokens are single-use: after any failed login
   // the widget is reset so the next attempt gets a fresh one (canonical
   // lifecycle from the Turnstile integration guide).
-  const TURNSTILE = { siteKey: null, enforced: false, widgetId: null, scriptPromise: null }
+  const TURNSTILE = { siteKey: null, enforced: false, problem: null, widgetId: null, scriptPromise: null, scriptError: false }
+
+  function loginError (msg) {
+    const err = $('#login-err')
+    if (!err) return
+    err.textContent = '✗ ' + msg
+    err.hidden = false
+  }
 
   async function initTurnstile () {
     if (TURNSTILE.siteKey !== null) return // already resolved (fetch once per page)
@@ -90,16 +97,33 @@
       const data = await res.json()
       TURNSTILE.siteKey = data.site_key || null
       TURNSTILE.enforced = !!data.enforced
+      TURNSTILE.problem = data.problem || null
     } catch { return } // offline / proxy hiccup — the server 403 will explain
-    if (!TURNSTILE.siteKey) return
-    const box = $('#turnstile')
+    // server enforces the gate but has no site key → the widget can NEVER
+    // render. Surface the misconfiguration right on the card instead of a
+    // dead login that 403s with no visible widget.
+    if (!TURNSTILE.siteKey) {
+      if (TURNSTILE.enforced) loginError(TURNSTILE.problem || 'captcha required by the server, but TURNSTILE_SITE_KEY is missing — add it to .env and restart')
+      return
+    }
+    const box = $('#turnstile-box')
     if (!box) return
     box.hidden = false
-    loadTurnstileApi().then(renderTurnstile).catch(() => { /* script failed — submit will surface it */ })
+    loadTurnstileApi()
+      .then(renderTurnstile)
+      .catch(() => {
+        // script blocked (ad blocker / network) — say so instead of failing
+        // silently and letting submit hit a 403 the user can't act on
+        TURNSTILE.scriptError = true
+        loginError('captcha widget failed to load — an ad blocker or network issue is blocking challenges.cloudflare.com')
+      })
   }
 
   function loadTurnstileApi () {
-    if (window.turnstile) return Promise.resolve() // already loaded (or mocked)
+    // ⚠ typeof check, NOT truthiness: browsers expose id'd elements as window
+    // properties, so a stray <div id="turnstile"> would make window.turnstile
+    // truthy (an HTMLElement) and silently skip loading the real script.
+    if (window.turnstile && typeof window.turnstile.render === 'function') return Promise.resolve()
     if (TURNSTILE.scriptPromise) return TURNSTILE.scriptPromise
     TURNSTILE.scriptPromise = new Promise((resolve, reject) => {
       const s = document.createElement('script')
@@ -113,8 +137,8 @@
   }
 
   function renderTurnstile () {
-    if (!window.turnstile || TURNSTILE.widgetId !== null) return
-    const el = $('#turnstile')
+    if (!window.turnstile || typeof window.turnstile.render !== 'function' || TURNSTILE.widgetId !== null) return
+    const el = $('#turnstile-box')
     if (!el || !TURNSTILE.siteKey) return
     TURNSTILE.widgetId = window.turnstile.render(el, {
       sitekey: TURNSTILE.siteKey,
@@ -126,18 +150,18 @@
   }
 
   function turnstileToken () {
-    if (TURNSTILE.widgetId === null || !window.turnstile) return null
+    if (TURNSTILE.widgetId === null || !window.turnstile || typeof window.turnstile.getResponse !== 'function') return null
     try { return window.turnstile.getResponse(TURNSTILE.widgetId) || null } catch { return null }
   }
 
   // single-use tokens: every failed attempt must re-challenge
   function resetTurnstile () {
-    if (TURNSTILE.widgetId === null || !window.turnstile) return
+    if (TURNSTILE.widgetId === null || !window.turnstile || typeof window.turnstile.reset !== 'function') return
     try { window.turnstile.reset(TURNSTILE.widgetId) } catch { /* ignore */ }
   }
 
   function removeTurnstile () {
-    if (TURNSTILE.widgetId === null || !window.turnstile) return
+    if (TURNSTILE.widgetId === null || !window.turnstile || typeof window.turnstile.remove !== 'function') return
     try { window.turnstile.remove(TURNSTILE.widgetId) } catch { /* ignore */ }
     TURNSTILE.widgetId = null
   }
@@ -151,14 +175,23 @@
     btn.disabled = true
     const pw = $('#login-pw').value
 
-    // captcha gate client-side: don't even send a request without a token
+    // captcha gate client-side: don't even send a request without a token.
+    // Every failure mode gets the message that actually helps (config missing,
+    // script blocked, widget still loading, or simply not solved yet).
     const tsToken = turnstileToken()
-    if (TURNSTILE.siteKey && !tsToken) {
+    if ((TURNSTILE.enforced || TURNSTILE.siteKey) && !tsToken) {
       btn.disabled = false
-      err.textContent = '✗ ' + (TURNSTILE.widgetId === null
-        ? 'verification required, but the widget could not load — check TURNSTILE_SITE_KEY / reload'
-        : 'complete the human verification first')
-      err.hidden = false
+      let msg
+      if (TURNSTILE.enforced && !TURNSTILE.siteKey) {
+        msg = TURNSTILE.problem || 'captcha required by the server, but TURNSTILE_SITE_KEY is missing — add it to .env and restart'
+      } else if (TURNSTILE.scriptError) {
+        msg = 'captcha widget failed to load — an ad blocker or network issue is blocking challenges.cloudflare.com'
+      } else if (TURNSTILE.widgetId === null) {
+        msg = 'verification required, but the widget could not load — check TURNSTILE_SITE_KEY / reload'
+      } else {
+        msg = 'complete the human verification first'
+      }
+      loginError(msg)
       return
     }
 
@@ -192,8 +225,7 @@
       $('#login-pw').value = pw
       resetTurnstile()
       const msg = /Failed to fetch|NetworkError/i.test(ex.message) ? 'network error — site unreachable' : (ex.message || 'login failed')
-      err.textContent = '✗ ' + msg
-      err.hidden = false
+      loginError(msg)
     } finally {
       btn.disabled = false
     }

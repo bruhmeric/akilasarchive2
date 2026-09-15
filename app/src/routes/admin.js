@@ -19,10 +19,18 @@ adminRouter.post('/login', handleLogin)
 // leaves the server. `enforced` lets the SPA give an accurate message when the
 // server expects a token but no widget could be rendered.
 adminRouter.get('/turnstile', (req, res) => {
+  const siteKey = config.turnstile.siteKey || null
+  const enforced = turnstileStatus().enabled
   res.json({
-    site_key: config.turnstile.siteKey || null,
+    site_key: siteKey,
     action: 'login',
-    enforced: turnstileStatus().enabled
+    enforced,
+    // surfaced on the login card when the widget cannot render. Without this,
+    // a secret-without-site-key misconfiguration shows only a generic
+    // "captcha required" 403 with NO widget — an unfixable-looking login.
+    problem: enforced && !siteKey
+      ? 'captcha required by the server, but TURNSTILE_SITE_KEY is missing — the widget cannot render. Add the site key (Cloudflare dashboard → Turnstile → widget → Site Key) to .env and restart the app.'
+      : null
   })
 })
 

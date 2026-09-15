@@ -12,6 +12,10 @@
  *        single-use replay → 403; captcha failures never consume the
  *        password lockout; failures logged as login_captcha
  *   phase 3 — siteverify unreachable    → fail closed (403)
+ *   phase 4 — secret set, site key MISSING → the exact misconfiguration that
+ *        locked the user out: widget can never render, so the 403 and the
+ *        /admin/api/turnstile payload must NAME the missing env var, and a
+ *        valid token must still pass (proving the gate itself is fine)
  */
 import { spawn } from 'node:child_process'
 import http from 'node:http'
@@ -52,6 +56,8 @@ function baseEnv (dataDir, port) {
 async function bootApp (env) {
   const app = spawn('node', ['src/server.js'], { cwd: path.join(root, 'app'), env, stdio: ['ignore', 'pipe', 'pipe'] })
   children.push(app)
+  app.logBuf = ''
+  app.stdout.on('data', (d) => { app.logBuf += d })
   app.stderr.on('data', (d) => process.stderr.write(`    [app] ${d}`))
   for (let i = 0; i < 40; i++) {
     try { if ((await fetch(`http://127.0.0.1:${env.PORT}/api/health`)).ok) return app } catch {}
@@ -214,6 +220,36 @@ console.log('\n[phase 3] siteverify unreachable — login fails closed')
   const l = await login(port, { token: freshToken() })
   ok('unreachable siteverify → 403', l.status === 403, JSON.stringify(l.json))
   ok('message says verification unavailable', /unavailable/.test(l.json.error))
+}
+
+// ════════════════════ phase 4 · secret without site key (lockout guard) ════════════════════
+console.log('\n[phase 4] TURNSTILE_SECRET set but TURNSTILE_SITE_KEY missing — self-explanatory failure')
+{
+  const dir = fs.mkdtempSync(path.join(root, '.ts-test-'))
+  const port = 3873
+  const app = await bootApp({
+    ...baseEnv(dir, port),
+    TURNSTILE_SECRET: SECRET,
+    TURNSTILE_SITEVERIFY_URL: `http://127.0.0.1:${stubPort}/siteverify`
+  })
+  await sleep(200) // let the boot banner flush
+
+  ok('boot hint explains the missing site key', /TURNSTILE_SITE_KEY/.test(app.logBuf || ''), (app.logBuf || '').slice(0, 300))
+
+  const cfg = await (await fetch(`http://127.0.0.1:${port}/admin/api/turnstile`)).json()
+  ok('config endpoint: site_key null + enforced true', cfg.site_key === null && cfg.enforced === true, JSON.stringify(cfg))
+  ok('config endpoint explains the problem (SPA shows it on the card)', /TURNSTILE_SITE_KEY/.test(cfg.problem || ''), JSON.stringify(cfg.problem))
+  ok('config endpoint never leaks the secret', !JSON.stringify(cfg).includes(SECRET))
+
+  let l = await login(port, {})
+  ok('login without token → 403', l.status === 403, JSON.stringify(l.json))
+  ok('403 message names the missing site key (not the generic hint)', /TURNSTILE_SITE_KEY/.test(l.json.error || ''), JSON.stringify(l.json.error))
+  ok('403 still flagged captcha:true', l.json.captcha === true)
+
+  // the gate itself trusts a valid token — proves the blocker was the missing
+  // WIDGET, not the server-side verification
+  l = await login(port, { token: freshToken() })
+  ok('valid token still logs in (gate OK — the widget was the blocker)', l.status === 200, JSON.stringify(l.json))
 }
 
 // ════════════════════ wrap up ════════════════════

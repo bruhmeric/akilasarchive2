@@ -45,6 +45,11 @@ app.use(express.static(publicDir, {
   maxAge: '1h',
   setHeaders (res, filePath) {
     if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-cache')
+    // the admin SPA evolves with deploys — a STALE admin.js from the browser
+    // cache produces "impossible" states (e.g. submitting logins without the
+    // captcha code the server now requires). no-cache still 304s via etag,
+    // so this is cheap for a single-user control plane.
+    else if (filePath.includes(`${path.sep}admin${path.sep}`)) res.setHeader('Cache-Control', 'no-cache')
   }
 }))
 

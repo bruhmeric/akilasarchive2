@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>e2e harness — turnstile login states</title>
+<link rel="stylesheet" href="../../app/public/admin/admin.css">
+<script>
+/* E2E harness pre-script: stubs fetch (the sandbox browser cannot reach the
+ * app over localhost) and, per ?scenario=, simulates the three login-screen
+ * captcha states. Loads BEFORE the real ../../app/public/admin/admin.js —
+ * everything below the marker is the REAL shipped code under test.
+ *
+ *   ?scenario=nokey      TURNSTILE_SECRET set, TURNSTILE_SITE_KEY missing
+ *                        → the card must show the problem, submit must be
+ *                          blocked locally, widget stays hidden
+ *   ?scenario=scriptfail site key set but challenges.cloudflare.com blocked
+ *                        → "failed to load" message, submit blocked
+ *   ?scenario=normal     fully configured (mocked window.turnstile API)
+ *                        → widget renders, unsolved blocks submit, solved
+ *                          submits password + cf-turnstile-response
+ */
+(() => {
+  const scenario = new URLSearchParams(location.search).get('scenario') || 'normal'
+  const SITE_KEY = '0x4AAAAAAE0HtN4t0uQjFGW1'
+  window.__H = { scenario, logins: [], renderOpts: null, renderCalls: 0, resets: 0, removes: 0, solved: false, scriptBlocked: false }
+
+  const json = (data, status = 200) => new Response(JSON.stringify(data), {
+    status, headers: { 'content-type': 'application/json' }
+  })
+
+  const turnstileCfg = scenario === 'nokey'
+    ? {
+        site_key: null,
+        action: 'login',
+        enforced: true,
+        problem: 'captcha required by the server, but TURNSTILE_SITE_KEY is missing — the widget cannot render. Add the site key (Cloudflare dashboard → Turnstile → widget → Site Key) to .env and restart the app.'
+      }
+    : { site_key: SITE_KEY, action: 'login', enforced: true, problem: null }
+
+  const STATUS = {
+    version: 'e2e', password_is_default: false,
+    categories: [{ id: 1, name: 'tv', slug: 'tv', bucket: 'bkt-tv', enabled: true, created_at: 1, last_index_at: Date.now(), last_index_ms: 5, last_error: null, file_count: 3, total_size: 3e9 }],
+    tokens_today: { issued: 1, used: 1 }, db_bytes: 12345, uptime_s: 42,
+    indexer: { running: false, queued: [], current: null },
+    settings: { index_interval_hours: 6, token_ttl_min: 10, dl_expiry_sec: 300 },
+    turnstile: { enabled: true, site_key: true, hostnames: ['akilasarchive.site'] },
+    dl_mode: 'worker', download_base: 'https://dl.example.test', r2_account: '0'
+  }
+
+  window.fetch = async (input, init = {}) => {
+    const url = String(input)
+    if (url.includes('/admin/api/turnstile')) return json(turnstileCfg)
+    // 401 until a login happened, 200 after (mirrors a live session cookie)
+    if (url.includes('/admin/api/session')) return window.__H.logins.length ? json({ ok: true }) : json({ error: 'unauthorized' }, 401)
+    if (url.includes('/admin/api/login')) {
+      window.__H.logins.push({ body: init.body ? JSON.parse(init.body) : null })
+      return json({ ok: true, secure: false })
+    }
+    if (url.includes('/admin/api/status')) return json(STATUS)
+    if (url.includes('/admin/api/settings')) return json({ settings: STATUS.settings, dl_mode: 'worker', download_base: 'https://dl.example.test' })
+    if (url.includes('/admin/api/logs')) return json({ logs: [] })
+    return json({})
+  }
+
+  if (scenario === 'scriptfail') {
+    // make the challenges.cloudflare.com script "fail to load" (ad-blocker):
+    // the src property is shadowed so no real network fetch ever starts, and
+    // onerror fires asynchronously like a genuine blocked request
+    const orig = document.createElement.bind(document)
+    document.createElement = (tag) => {
+      const el = orig(tag)
+      if (String(tag).toLowerCase() === 'script') {
+        let src = ''
+        Object.defineProperty(el, 'src', {
+          get: () => src,
+          set: (v) => {
+            src = v
+            if (String(v).includes('challenges.cloudflare.com')) {
+              window.__H.scriptBlocked = true
+              setTimeout(() => { try { el.onerror && el.onerror(new Error('blocked')) } catch {} }, 20)
+            }
+          },
+          configurable: true
+        })
+      }
+      return el
+    }
+  }
+
+  if (scenario === 'normal') {
+    // mock the Turnstile JS API (defined before admin.js → loadTurnstileApi
+    // short-circuits, exactly like a real already-loaded script)
+    window.turnstile = {
+      render: (el, opts) => { window.__H.renderOpts = opts; window.__H.renderCalls++; return 7 },
+      getResponse: () => (window.__H.solved ? 'XXXX.MOCK.TOKEN.YYYY' : null),
+      reset: () => { window.__H.resets++ },
+      remove: () => { window.__H.removes++ }
+    }
+  }
+})()
+</script>
+</head>
+<body>
+
+<!-- login (markup mirrors app/public/admin/index.html) -->
+<div id="login" class="login-wrap">
+  <form id="login-form" class="login-card">
+    <div class="login-logo">⬡</div>
+    <h1>akilas archive</h1>
+    <p class="login-sub">root console — authenticate</p>
+    <input id="login-pw" type="password" placeholder="admin password" autocomplete="current-password" autofocus>
+    <div id="turnstile-box" class="turnstile" hidden></div>
+    <button type="submit">login</button>
+    <div id="login-err" class="login-err" hidden></div>
+  </form>
+</div>
+
+<!-- app -->
+<div id="app" class="app" hidden>
+  <aside class="side">
+    <div class="brand">⬡ akilas<span>archive</span></div>
+    <nav>
+      <button data-view="dash" class="on">dashboard</button>
+      <button data-view="stats">statistics</button>
+      <button data-view="cats">categories</button>
+      <button data-view="settings">settings</button>
+      <button data-view="logs">log</button>
+    </nav>
+    <div class="side-foot">
+      <div id="ver" class="dim"></div>
+      <button id="logout">logout</button>
+    </div>
+  </aside>
+
+  <main>
+    <div id="default-warn" class="warn-banner" hidden></div>
+    <section id="view-dash" class="view">
+      <h2>dashboard</h2>
+      <div class="cards">
+        <div class="card"><div class="k">files indexed</div><div class="v" id="d-files">—</div></div>
+        <div class="card"><div class="k">total size</div><div class="v" id="d-size">—</div></div>
+        <div class="card"><div class="k">categories</div><div class="v" id="d-cats">—</div></div>
+        <div class="card"><div class="k">links today</div><div class="v" id="d-tokens">—</div></div>
+        <div class="card"><div class="k">index size</div><div class="v" id="d-db">—</div></div>
+        <div class="card"><div class="k">uptime</div><div class="v" id="d-up">—</div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head">
+          <h3>indexer</h3>
+          <button id="reindex-all" class="btn">rebuild all indexes</button>
+        </div>
+        <div id="indexer-state" class="indexer-state">idle</div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>categories</h3><span class="dim" id="cats-note"></span></div>
+        <table class="tbl" id="dash-cats"></table>
+      </div>
+    </section>
+    <section id="view-stats" class="view" hidden>
+      <h2>statistics</h2>
+      <div class="cards" id="stats-cards"></div>
+      <div class="panel">
+        <div class="panel-head"><h3>categories</h3><span class="dim" id="stats-cats-note"></span></div>
+        <table class="tbl" id="stats-cats"></table>
+      </div>
+      <div class="grid2">
+        <div class="panel"><div class="panel-head"><h3>file types</h3></div><div id="stats-ext" class="barlist"></div></div>
+        <div class="panel"><div class="panel-head"><h3>size distribution</h3></div><div id="stats-sizes" class="barlist"></div></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>one-time links · downloads per day (14 days)</h3><span class="dim" id="stats-links-note"></span></div>
+        <div id="stats-days" class="barlist"></div>
+      </div>
+      <div class="grid2">
+        <div class="panel"><div class="panel-head"><h3>most downloaded</h3></div><table class="tbl" id="stats-top"></table></div>
+        <div class="panel"><div class="panel-head"><h3>largest files</h3></div><table class="tbl" id="stats-largest"></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>newest files in the archive</h3></div>
+        <table class="tbl" id="stats-newest"></table>
+      </div>
+    </section>
+    <section id="view-cats" class="view" hidden>
+      <h2>categories</h2>
+      <p class="dim">each category serves one R2 bucket.</p>
+      <div class="panel">
+        <div class="panel-head"><h3>add category</h3></div>
+        <form id="add-cat" class="add-form">
+          <div class="field">
+            <label>display name</label>
+            <input id="cat-name" placeholder="Movies" maxlength="40" required>
+            <span class="hint">shown in the terminal</span>
+          </div>
+          <div class="field">
+            <label>R2 bucket name</label>
+            <input id="cat-bucket" placeholder="my-movies-bucket" required>
+            <span class="hint">exactly as it appears in Cloudflare R2</span>
+          </div>
+          <button class="btn primary" type="submit">add &amp; index</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>served buckets</h3></div>
+        <table class="tbl" id="cats-table"></table>
+      </div>
+    </section>
+    <section id="view-settings" class="view" hidden>
+      <h2>settings</h2>
+      <div class="panel">
+        <div class="panel-head"><h3>behaviour</h3></div>
+        <form id="settings-form" class="settings-grid">
+          <div class="field"><label>re-index interval (hours, 0 = manual only)</label><input id="s-interval" type="number" min="0" max="168"></div>
+          <div class="field"><label>one-time link lifetime (minutes)</label><input id="s-ttl" type="number" min="1" max="60"></div>
+          <div class="field"><label>download window after redeem (seconds)</label><input id="s-expiry" type="number" min="30" max="3600"></div>
+          <button class="btn primary" type="submit">save</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>change password</h3></div>
+        <form id="pw-form" class="settings-grid">
+          <div class="field"><label>current password</label><input id="pw-cur" type="password" required></div>
+          <div class="field"><label>new password (min 8 chars)</label><input id="pw-new" type="password" minlength="8" required></div>
+          <button class="btn primary" type="submit">change</button>
+        </form>
+      </div>
+      <div class="panel">
+        <div class="panel-head"><h3>deployment (read-only)</h3></div>
+        <dl class="kv" id="env-info"></dl>
+      </div>
+    </section>
+    <section id="view-logs" class="view" hidden>
+      <h2>activity log</h2>
+      <div class="panel"><table class="tbl" id="log-table"></table></div>
+    </section>
+  </main>
+</div>
+
+<div id="toast" hidden></div>
+<!-- ↑↑↑ everything above is harness/stub · below is the REAL shipped code -->
+<script src="../../app/public/admin/admin.js"></script>
+</body>
+</html>
