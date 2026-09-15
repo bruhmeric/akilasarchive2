@@ -157,7 +157,7 @@ Open **`https://akilasarchive.site/admin`** and log in.
 
 A Cloudflare Turnstile widget protects the admin login from bots and
 credential-stuffing. The widget is already created in your Cloudflare
-dashboard (Turnstile → your widget → site key `0x4AAAAAAE0HtN4t0uQjFGW1`).
+dashboard (Turnstile → your widget → site key `0x4AAAAAAE1dPKOfQ8Nb4P8f`).
 To enable it end-to-end:
 
 1. **Widget hostnames** — Cloudflare dashboard → **Turnstile → your widget
@@ -171,7 +171,7 @@ To enable it end-to-end:
    `TURNSTILE_HOSTNAMES` in production.
 2. **`.env` on the VPS** — set both keys:
    ```bash
-   TURNSTILE_SITE_KEY=0x4AAAAAAE0HtN4t0uQjFGW1
+   TURNSTILE_SITE_KEY=0x4AAAAAAE1dPKOfQ8Nb4P8f
    TURNSTILE_SECRET=<Secret Key from dashboard → Turnstile → your widget>
    docker compose up -d   # picks up the new env
    ```

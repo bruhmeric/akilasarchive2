@@ -53,7 +53,7 @@ export function bootHints () {
  * Verify a login-captcha token.
  * @param {string|undefined} token `cf-turnstile-response` from the request body
  * @param {string} ip client IP, sent as remoteip (optional, best-effort)
- * @returns {Promise<{ok: true}|{ok: false, reason: 'missing'|'malformed'|'invalid'|'unreachable'}>}
+ * @returns {Promise<{ok: true}|{ok: false, reason: 'missing'|'malformed'|'invalid'|'secret-mismatch'|'stale-token'|'unreachable'}>}
  */
 export async function verifyLoginToken (token, ip) {
   if (!turnstileEnabled()) return { ok: true }
@@ -79,11 +79,23 @@ export async function verifyLoginToken (token, ip) {
     return { ok: false, reason: 'unreachable' }
   }
 
-  if (
-    !result.success ||
-    result.action !== LOGIN_ACTION ||
-    !expectedHostnames.has(result.hostname)
-  ) {
+  // siteverify's error-codes tell the two fixable config/runtime failures
+  // apart from a plain bad token:
+  //   invalid-input-secret → .env still holds the PREVIOUS widget's secret
+  //     (the classic trap right after recreating a widget: new site key, old
+  //     secret — every solved token is then rejected forever)
+  //   timeout-or-duplicate → token expired or replayed — solve it again
+  const codes = Array.isArray(result['error-codes']) ? result['error-codes'] : []
+  if (!result.success) {
+    if (codes.includes('invalid-input-secret') || codes.includes('missing-input-secret')) {
+      return { ok: false, reason: 'secret-mismatch', codes }
+    }
+    if (codes.includes('timeout-or-duplicate') || codes.includes('invalid-input-response')) {
+      return { ok: false, reason: 'stale-token', codes }
+    }
+    return { ok: false, reason: 'invalid', codes }
+  }
+  if (result.action !== LOGIN_ACTION || !expectedHostnames.has(result.hostname)) {
     return { ok: false, reason: 'invalid' }
   }
   return { ok: true }

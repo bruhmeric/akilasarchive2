@@ -112,6 +112,12 @@ const CAPTCHA_ERRORS = {
   missing: 'captcha required — complete the human verification',
   malformed: 'captcha token malformed',
   invalid: 'captcha verification failed — retry',
+  // .env holds the previous widget's secret — happens when the Turnstile
+  // widget is deleted + recreated: the site key gets updated but the secret
+  // belongs to the dead widget, so every solved token is rejected forever.
+  // Naming it turns an undiagnosable "retry" loop into a 1-minute fix.
+  'secret-mismatch': 'captcha verification failed: TURNSTILE_SECRET does not match the widget — if the widget was recreated, re-copy the NEW Secret Key from the dashboard into .env and restart',
+  'stale-token': 'captcha verification failed: the token expired or was already used — solve the verification again',
   unreachable: 'captcha verification unavailable — try again shortly'
 }
 
@@ -130,7 +136,7 @@ export async function handleLogin (req, res) {
   if (turnstileEnabled()) {
     const verdict = await verifyLoginToken(req.body?.['cf-turnstile-response'], ip)
     if (!verdict.ok) {
-      adminLog('login_captcha', `ip ${ip} · ${verdict.reason}`)
+      adminLog('login_captcha', `ip ${ip} · ${verdict.reason}${verdict.codes?.length ? ' (' + verdict.codes.join(',') + ')' : ''}`)
       let msg = CAPTCHA_ERRORS[verdict.reason] || 'captcha verification failed'
       // self-lockout guard: without a site key the widget can NEVER render, so
       // "complete the human verification" would be impossible advice — name

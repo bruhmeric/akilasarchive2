@@ -23,7 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const root = path.resolve(import.meta.dirname, '..')
-const SITE_KEY = '0x4AAAAAAE0HtN4t0uQjFGW1'
+const SITE_KEY = '0x4AAAAAAE1dPKOfQ8Nb4P8f'
 const SECRET = '1.0xUnitTestSecretDoNotUseAnywhere00000'
 const PW = 'TurnstilePass123'
 
@@ -163,10 +163,21 @@ console.log('\n[phase 2] TURNSTILE_SECRET set — canonical siteverify gate')
   l = await login(port, { token: freshToken() })
   ok('hostname not in allowlist → 403', l.status === 403, JSON.stringify(l.json))
 
-  // success:false
+  // success:false with a generic code → plain invalid
   stubState.script = { success: false, 'error-codes': ['bad-token'] }
   l = await login(port, { token: freshToken() })
   ok('success:false → 403', l.status === 403, JSON.stringify(l.json))
+
+  // invalid-input-secret → the recreated-widget trap: new site key, OLD
+  // secret in .env → every solved token rejected. Must name TURNSTILE_SECRET.
+  stubState.script = { success: false, 'error-codes': ['invalid-input-secret'] }
+  l = await login(port, { token: freshToken() })
+  ok('invalid-input-secret → 403 naming TURNSTILE_SECRET', l.status === 403 && /TURNSTILE_SECRET/.test(l.json.error), JSON.stringify(l.json))
+
+  // timeout-or-duplicate → expired/replayed token → tell the user to re-solve
+  stubState.script = { success: false, 'error-codes': ['timeout-or-duplicate'] }
+  l = await login(port, { token: freshToken() })
+  ok('timeout-or-duplicate → 403 telling to solve again', l.status === 403 && /solve the verification again/.test(l.json.error), JSON.stringify(l.json))
 
   // malformed (>2048 chars)
   l = await login(port, { token: 'x'.repeat(2049) })

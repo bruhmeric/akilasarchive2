@@ -22,7 +22,7 @@
  */
 (() => {
   const scenario = new URLSearchParams(location.search).get('scenario') || 'normal'
-  const SITE_KEY = '0x4AAAAAAE0HtN4t0uQjFGW1'
+  const SITE_KEY = '0x4AAAAAAE1dPKOfQ8Nb4P8f'
   window.__H = { scenario, logins: [], renderOpts: null, renderCalls: 0, resets: 0, removes: 0, solved: false, scriptBlocked: false }
 
   const json = (data, status = 200) => new Response(JSON.stringify(data), {
